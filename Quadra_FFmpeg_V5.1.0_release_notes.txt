@@ -1,0 +1,657 @@
+================================================================================
+Release version: 5.1.0_RC4
+Date: 2024-11-26            SW version: 5.1.0_RC4           FW version: 5.1.0_RC4
+Compat FW API ver: 6rt      Libxcoder API ver: 2.68
+--------------------------------------------------------------------------------
+[LIBAVFILTER] Remove backpressure for ni_quadra_drawtext filter
+[LIBAVFILTER] Support flexible setting of background area for ni_quadra_drawtext
+[LIBAVFILTER] Remove back-pressure for bgr filter
+[FFMPEG] Add backpressure support for FFmpeg 6.1 and FFmpeg 7.0 Native hw_upload filter
+[FFMPEG/LIBAVCODEC/LIBAVFILTER] Buffer backpressure support for FFmpeg filters
+                                Changing FW API version to 6rt
+                                Changing libxcoder API version to 2.68
+[LIBAVFILTER] Fix an issue with ni_quadra_drawtext filter did not copy AVHWFramesContext to dst frame
+[FFMPEG/LIBAVCODEC/LIBAVFILTER] Change some AV_ERROR_LOG messages to other log levels
+[LIBAVFILTER] Added the support of 10 bits hvsplus filter
+              Changing FW API version to 6rr
+[LIBAVFILTER] Fix ni_quadra_ai_pre sw mode causing a coredump
+[FFMPEG] Fix check_hw_info function unable to get best card in FFmpeg-n3.1,1
+[LIBAVFILTER] Fix side data accumulation issue in drawtext filter
+[FFMPEG/LIBAVFILTER] Added the change to support the hvsplus filter in FFmpeg
+                     Changing FW API version to 6rp
+[LIBAVCODEC] Export psnr and ssim via libxcoder and FFmpeg packets and Fix h.265 10-bit psnr_y value showing an incorrect value
+             Changing libxcoder API version to 2.66
+[LIBAVCODEC] Support h.265 Motion Constrained mode and tile based encode multiview API example
+             Changing FW API version to 6rk
+             Changing libxcoder API version to 2.65
+[LIBAVFILTER] Add ni_quadra_ai_pre filter support for sw frame input
+[LIBAVFILTER] Support reconfig for ni_quadra_drawtext
+[FFMPEG] Fix an issue with hwupload crashing during UDP livestream by circular buffer overrun at 33-bit PTS wrap-around
+[FFMPEG] Fix some build issues when building under Android 14
+[FFMPEG/LIBAVCODEC/LIBAVFILTER] Change some error log to info
+[FFMPEG] Added variant stream mapping for scte-35 streams in HLS segmenter
+[LIBAVFILTER] Fix file descriptor leak in roi filter when using out=sw mode
+[FFMPEG/LIBAVCODEC] Add psnr info to AVPacket side data api
+================================================================================
+Release version: 5.0.0_RC2
+Date: 2024-08-28            SW version: 5.0.0_RC2           FW version: 5.0.0_RC1
+Compat FW API ver: 6rf      Libxcoder API ver: 2.64
+--------------------------------------------------------------------------------
+[FFMPEG] Fix compile failure when quadra is not enabled for compile
+[FFMPEG] In FFmpeg-n7.0 update hevc_mp4toannexb.c to support sequence change like other Netint FFmpeg versions
+         - Do not prepend headers to to IRAP frame packets if VPS/PPS is already part of frame packet
+[FFMPEG] In ni_quadra_hwupload filter allow auto-selection of card with lowest amount of raw frame data being uploaded to it
+         - ni_quadra_hwupload=-1 to select card based on model_load
+         - ni_quadra_hwupload=-2 to select card based on hwupload bandwidth
+         Changing FW API version to 6rf
+[LIBAVCODEC] Fix memory leak on quadra card when calling nicodec.c:ni_frame_free() during use of multiple PPU outputs
+[FFMPEG/LIBAVCODEC] Remove gstreamer build flag from FFmpeg and build scripts
+[FFMPEG] For FFmpeg-n7.0, exit netint decoder when avcodec_receive_frame() returns error to avoid dead loop
+[FFMPEG] Fix filters unnecessarily triggering frame backpressure resulting in decoder frame buffers exhaustion
+[FFMPEG] Automatically enable xcoder-param "GenHdrs=1" for FLV
+[LIBAVCODEC] Fix libavcodec apiexamples compile for FFmpeg-n7.0
+[LIBAVCODEC] Fix FFmpeg-n7.0 jpeg_ni_quadra_enc not rejecting rgba pixel format input
+[FFMPEG] Fix FFmpeg & libxcoder compile errors on Windows with MinGW64-10.0
+[FFMPEG/LIBAVCODEC] Allow encoder to set buffer acquisition limit for upstream
+                    - add xcoder-param "enableAcqLimit=1" to limit HW frame buffers from filters/decoder upstream of encoder
+                    - add "buffer_limit=1" param for netint quadra filters in libavfilter
+                    - enable "enableAcqLimit=1" and "buffer_limit=1" in FFmpeg-n7.0 by default
+                    Changing FW API version to 6rb
+[LIBAVCODEC] Handle errors when calling av_hwdevice_ctx_create() for quadra decoders
+================================================================================
+Release version: 4.9.0_RC3
+Date: 2024-06-06            SW version: 4.9.0_RC3           FW version: 4.9.0_RC3
+Compat FW API ver: 6rZ      Libxcoder API ver: 2.63
+--------------------------------------------------------------------------------
+[FFMPEG] Update NETINT_FFMPEG_CHANGE_LIST.txt for v4.9.0
+[LIBAVCODEC] Add check for invalid device handle during encoder close to prevent segfault 
+[LIBAVCODEC] Fix risk of memory leak when calling ni_device_session_open() 
+[FFMPEG/LIBAVCODEC] Fix Logan compilation issues
+[FFMPEG] Update run_ffmpeg_quadra.sh to handle all ffmpeg versions
+[LIBAVCODEC] Fix H264 VUI info in metadata where it is not updated if VUI info of the bitstream is changed
+[LIBAVCODEC] Fix variable causing false positive on VPU recovery issue
+[FFMPEG/LIBAVCODEC] Add FFmpeg-n7.0
+[FFMPEG/LIBAVCODEC] Support reconfig general side data via FFmpeg api
+[LIBAVCODEC] Add decoder/encoder disableAdaptiveBuffers option.
+             Changing FW API version to 6rS
+[LIBAVCODEC] Update GStreamer plugin and FFmpeg descriptions to use 'NETINT Quadra' to describe  decoders,encoders and filters
+[LIBAVCODEC] Added enableFollowIFrame decoder parameter
+             Changing libxcoder API version to 2.56
+[FFMPEG/LIBAVCODEC] Add bitstream filters to FFmpeg-n6.1
+[FFMPEG] Fix an issue where FFmpeg-n6.0 and FFmpeg-n6.1 was crashing when parsing HEVC SEI messages
+[LIBAVCODEC] Fix a pts problem causing frame loss after encoding and decoding on FFmpeg for video clip containing invalid dts/pts
+[FFMPEG/LIBAVCODEC] Add new p2p filter
+                    Netint kernel driver to support dma-buf importing. 
+                    Add the ni_p2p_xfer filter to do a P2P transfer via p2p write.
+                    Changing FW API version to 6rK 
+                    Changing libxcoder API version to 2.54
+[FFMPEG] Add Windows workaround link error of quadra+logan FFmpeg build
+[FFMPEG/LIBAVCODEC] Fix FFmpeg-n6.1 exhausting all pre-allocated mem bin buffers causing FFmpeg command fail
+[FFMPEG] Add workaround for FFmpeg-n6.1 source stream frame rate probing issue
+[FFMPEG] Add ni_quadra_flip filter
+[LIBAVCODEC] Fix output statistical information when closing decoder on 32-bit system
+             Changing libxcoder API version to 2.53
+================================================================================
+Release version: 4.8.2_RC3
+Date: 2024-03-25            SW version: 4.8.2_RC3           FW version: 4.8.2_RC2
+Compat FW API ver: 6rK      Libxcoder API ver: 2.54
+--------------------------------------------------------------------------------
+[FFMPEG/LIBAVCODEC] Add new p2p filter
+                    Netint kernel driver to support dma-buf importing. 
+                    Add the ni_p2p_xfer filter to do a P2P transfer via p2p write.
+                    Changing FW API version to 6rK 
+                    Changing libxcoder API version to 2.54
+================================================================================
+Release version: 4.8.0_RC2
+Date: 2024-02-27            SW version: 4.8.0_RC2           FW version: 4.8.0_RC1
+Compat FW API ver: 6rJ      Libxcoder API ver: 2.52
+--------------------------------------------------------------------------------
+[FFMPEG] Update NETINT_FFMPEG_CHANGE_LIST.txt for v4.8.0
+[FFMPEG] Add new sidedata type for AVRegionOfInterest and fix FFmpeg-n6.1 shared build dependency for ni_roi
+[FFMPEG/LIBAVCODEC] Add Logan and Quadra co-existence support for FFmpeg-n6.1 Linux
+[FFMPEG] Fix FFmpeg-n6.1 decoding stuck when using ffmpeg stream_loop param
+[LIBAVCODEC] Fix memleak with decoder packet buffer on decoder close
+[LIBAVCODEC] Fix FFmpeg-n6.1 segmentation fault when encoder sequence change open session fail
+[FFMPEG] One-to-one correspondence between card index and module_id to avoid changing index if card is removed
+[LIBAVCODEC] Drop less permissive profile check
+[FFMPEG] Support ni_ai_pre filter on all versions of ffmpeg
+[FFMPEG] Ensure color_range is copied for Quadra & Logan
+[FFMPEG/LIBAVCODEC] Fix multiple apiexamples failing on android
+[FFMPEG] Fix AV1 incorrect ivf header field for FFmpeg versions less than 6.1
+[FFMPEG] Add support for SCTE 35 data in HLS manifest files 
+[FFMPEG] FFmpeg-n6.1 set hevc tag as hvc1 for mp4
+[FFMPEG/LIBAVCODEC] Fix ffmpeg-n6.1 fate test failure
+[FFMPEG] Add new merge filter which combines PPU and 2D engine scaling to improve quality
+         Changing FW API version to 6rF
+[LIBAVCODEC] Support Decoding and Encoding All SEI Types (both custom and standard)
+             Add parameter 'enableAllSeiPassthru' for decoder and encoder
+[FFMPEG] Add support for mpegts_max_audio_bitrate[N] for up to N=10 audio tracks
+[LIBAVCODEC] Fix FFmpeg-n6.1 pts mismatch between sw dec and ni dec
+[FFMPEG] Add FFmpeg-n6.1 support for custom flv codec id
+[FFMPEG] Width align to 2 pixels and height align to 4 pixels in tile mode
+[FFMPEG] Fix FFmpeg-n6.1 the first filter frame's timing info
+[FFMPEG] Make FFmpeg-n6.1 filter/encode hw frames one by one
+[LIBAVCODEC] Expand custom sei data size from 1024 to 8192
+             Changing libxcoder API version to 2.49
+[FFMPEG] Added FFmpeg-n6.1
+[FFMPEG] Support hwdownload without hwframe session ID context
+[LIBAVCODEC] Fix FFmpeg error on resolution change during transcoding when lookaheadDepth is non-zero
+[LIBAVCODEC] Skip profile check when AVC/HEVC profile is equal to 0
+================================================================================
+Release version: 4.7.0_RC4
+Date: 2023-12-14            SW version: 4.7.0_RC4           FW version: 4.7.0_RC4
+Compat FW API ver: 6r8      Libxcoder API ver: 2.46
+--------------------------------------------------------------------------------
+[FFMPEG] Update NETINT_FFMPEG_CHANGE_LIST.txt for v4.7.0
+[FFMPEG] Fix a file handle leak in FFmpeg when using HW frames
+[LIBAVCODEC] Add avcodec_flush_buffers() support for h264_ni_quadra_dec and h265_ni_quadra_dec
+[LIBAVCODEC] Add decoding xcoder-param "enableLowDelayCheck=1" to cease lowdelay decoding mode when B frame is encountered
+             Changing FW API version to 6r5
+             Changing libxcoder API version to 2.46
+[LIBAVCODEC] Treat pix_fmt AV_PIX_FMT_NONE as AV_PIX_FMT_YUVJ420P during decoding
+[LIBAVCODEC] Refactor some functions from libxcoder_quadra, nicodec.c, and nienc.c to libxcoder
+             Changing libxcoder API version to 2.45
+[LIBAVCODEC] Allow HW frames of RGBA/BGRA/ABGR/ARGB pixfmt to be auto-downloaded if filter is a separate card from encoder
+[FFMPEG] Add ni_quadra_delogo filter
+         - This filter does not support P2P output
+[LIBAVCODEC] Support encoder reconfig for xcoder-params vbvMaxRate and vbvBufferSize
+             Changing FW API version to 6r1
+[FFMPEG] Fix ni_quadra_hwupload filter issue when pool_size is set
+         Use position-independent code (--enable-pic) when building FFmpeg without libav shared libraries
+[FFMPEG] Fix mis-configuration of non-Netint encoders with Netint specific params
+[LIBAVCODEC] Support zeroCopyMode in semi-planar pixel formats
+             Support hwupload zeroCopyMode for semi-planar pixel formats (linesize requires 128 bytes alignment)
+             Modify encoder zeroCopyMode=-1 (default) policy to enable zero copy if resolution >= 1080p, regardless of bit depth and pixel format
+             Changing FW API version to 6q
+[FFMPEG/LIBAVCODEC] Add FFmpeg-n6.0
+[LIBAVCODEC] Add RGBA and BGRA direct encoding support (previously direct encoding only supported ARGB and ABGR)
+================================================================================
+Release version: 4.6.0_RC5
+Date: 2023-10-09            SW version: 4.6.0_RC5           FW version: 4.6.0_RC2
+Compat FW API ver: 6n       Libxcoder API ver: 2.43
+--------------------------------------------------------------------------------
+[LIBAVCODEC] Support float point crf:
+             - add new parameter crfFloat to support float point crf
+             - add new API ni_reconfig_crf2
+             - add new reconfig float point crf mode - XCODER_TEST_RECONF_CRF_FLOAT
+[LIBAVCODEC] New Gstreamer valgrind memory leaks in Reg3 case
+[LIBAVCODEC] Fix reg Q101215 Q099274 Q099297 && fix memory leak
+[LIBAVCODEC] Get decoder color info through VUI.
+[LIBAVCODEC] Add new parameter minFramesDelay to minimize encoder frame delay, revert lowDelay behaviour
+[LIBAVCODEC] Use ffmpeg's low_delay param if xcoder's lowDelay param is not set.
+[LIBAVCODEC] Set the initial value of framerate to 30
+             Add the low_delay_mode == 2 support for encoder
+[FFMPEG/LIBAVCODEC] Refactor encode decode filter
+                    - support compile t408 and quadra
+                    - fix quadra pts dts error
+                    - fix pix format occurs warning
+                    - remove all ni_logan file
+[FFMPEG] Add missing ai_pre_ni_quadra_filter_deps declaration to configure
+[FFMPEG] Limit print
+[FFMPEG/LIBAVCODEC] Support AV1 tile codec for all FFmpeg versions
+[FFMPEG] Add NI filter latency measurement in ffmpeg
+[FFMPEG] Fix type mismatch assembler in mathops.h
+         cherry picking the official FFmpeg commit 25cd95a.
+[FFMPEG] Add a ffmpeg parameter -force_nidec to force select the ni hw decoder;
+         supported values:logan, quadra;
+[LIBAVCODEC] Set dtsOffset to 1 for gopPresetIdx=3,7 and 0 conditionally
+             This is because ffmpeg sets has_b_frames to 1 if frame type is B
+[FFMPEG] Sunset clang-format
+[LIBAVCODEC] Correct dtsOffset to support minimal cts for encoder
+[LIBAVCODEC] Support reconfig of CRF
+             - Add reconfDemoMode 14 for reconfig crf via sidedata
+             - Add reconfDemoMode 114 for reconfig crf via API
+[LIBAVCODEC] Support reconfig bitrate via AVFrame sidedata
+[FFMPEG] Fix extralibs for libxcoder in FFmpeg configure file
+[FFMPEG] Add ni_quadra_ai_pre filter to FFmpeg for using Quadra AI with custom network binary
+         Add support in libxcoder/FFmpeg for AI preprocessor filter HW frames
+[LIBAVCODEC] Support unspecified color range for jepg encoder
+[FFMPEG] Make vf_yuv420to444_ni.c and vf_yuv444to420_ni.c independent of libxcoder during FFmpeg compilation
+[LIBAVCODEC] Add supported pix_fmt for jepg encoder
+================================================================================
+Release version: 4.5.0_RC6
+Date: 2023-08-16            SW version: 4.5.0_RC6           FW version: 4.5.0_RC5
+Compat FW API ver: 6a       Libxcoder API ver: 2.35
+--------------------------------------------------------------------------------
+[FFMPEG/LIBAVCODEC] Update co-existence support for Logan/T408 to T408 SW v3.3.0
+                    Excluding update of: apiexamples, non-Linux platforms support
+                    Update libxcoder_logan from T408_XCODER_FFMPEG/LIBXCODER_RELEASE_3.3.0
+[LIBAVCODEC] Add unsupported HW frame pixfmt check in filters/encoders
+[FFMPEG] Add libavcodec AI API example ni_roi_transcoder.c to demonstrate use of HW accelerated AI for identifying region of interest
+[FFMPEG] Add a more descriptive error message when sequence change occurs whilst using HW frames and autoscale
+[LIBAVCODEC] Support encoding with RGBA/BGRA/ABGR/ARGB pixel formats:
+             - Support RGBA/BGRA/ABGR/ARGB pixel formats direct data transfer to encoder (previously required hwupload to transfer data)
+             - Support zero copy for RGBA/BGRA/ABGR/ARGB pixel in encoder data transfer path
+             Changing FW API version to 6U
+[LIBAVCODEC] Fix file handle leak when using HW frames during decoding
+[FFMPEG] In FFmpeg configure script, autodetect Netint HW acceleration libraries (eg. libxcoder) to enable Netint codec/filters
+[LIBAVCODEC] Fix sequence change in MP4 container lacking SPS/PPS
+[LIBAVCODEC] Fix bad printout for explaining errors in user set xcoder-params
+[LIBAVCODEC] Move XCoderH265EncContext from stack to heap
+================================================================================
+Release version: 4.4.0_RC4
+Date: 2023-06-16            SW version: 4.4.0_RC4           FW version: 4.4.0_RC3
+Compat FW API ver: 6T       Libxcoder API ver: 2.31
+--------------------------------------------------------------------------------
+[LIBAVCODEC] Add support for aspect ratio, color desc, and timing info in SPS/sequence-header of AV1 & AVC
+[FFMPEG/LIBAVCODEC] Add AV1 tile based transcoding for gopPresetIdx=1
+                    - Add apiexample/ni_av1_tile_transcoding.c
+                    - Add libavcodec/ni_av1*
+                    - Min width/height: 256
+                    - Max tiles: 128
+                    Changing libxcoder API version to 2.30
+                    Changing FW API version to 6S
+[LIBAVCODEC] For Netint codecs in libavcodec, add params for autoselection of card to use based on modeled load (-bestmodelload) or real load (-bestload)
+[FFMPEG] Fix incorrect BGRP frame initialization in FFmpeg-n5.0
+[LIBAVCODEC] Reject unsupported xcoder-params on JPEG and AV1 encoders
+[LIBAVCODEC] Add support for ARGB and ABGR pixel format input to encoder when using HW frames
+[FFMPEG] Fix Gstreamer avhwuploader_ni_quadra element causing downstream scaler element to open session on wrong card in multicard environment
+[FFMPEG] Add libavcodec apiexample for yuv444p to 2*yuv420p conversion
+         Add libavcodec apiexample for 2*yuv420p to yuv444p conversion
+         Fix image corruption in ni_quadra_yuv420to444 and ni_quadra_yuv444to420 filters when resolution requires alignment padding
+[FFMPEG] Fix bug initializing ni_quadra_drawtext filter on FFmpeg-n5.0+
+[LIBAVCODEC] In h264_ni_quadra_dec add support for decoding selected temporal layers with -xcoder-params "svctDecodingLayer"
+[LIBAVCODEC] Fix incorrect libavcodec version check in FFmpeg-n5.0 for enabling DolbyVision support
+[FFMPEG] Fix ni_quadra_drawtext filter applying shifted background under text
+         Fix ni_quadra_overlay filter applying stretched background under overlay image when it has transparent elements and is larger than background image
+         Fix ni_quadra_drawtext filter box param to generate same dimension of boxes as SW drawtext filter
+[FFMPEG/LIBAVCODEC] Add xcoder-param "zeroCopyMode" to enable or disable zero copy (by default auto-enabled for resolution >=1080p)
+                    - Improves performance by reducing host memory copy
+                    - Add zero copy sample code in libxcoder app encode and sequence change paths
+                    Changing libxcoder API version to 2.26
+                    Changing FW API version to 6Q
+[FFMPEG] Add warning message in FFmpeg app compiled with flags for GStreamer integration
+         The changes in libavcodec to improve GStreamer integration interferes with use of libavcodec by FFmpeg app
+[LIBAVCODEC] Fix memory leak when parsing user params for Netint codecs
+[FFMPEG] Fix unintended cropping when using text shadow in ni_quadra_drawtext filter
+[FFMPEG] Fix memory leak when closing ni_quadra_drawbox filter
+[FFMPEG] Fix discrepancy between windows and linux results of ni_quadra_hwdownload filter
+[FFMPEG] In build_ffmpeg.sh add `--static` arg to compile ffmpeg entirely static
+[FFMPEG/LIBAVCODEC] Auto-insert ni_quadra_rotate filter when hw frames needs auto-rotation (eg. when mp4 metadata specifies rotate)
+[FFMPEG] Fix a small memory leak when closing ni_quadra_split filter
+[FFMPEG] Remove references to yuv420to444_ni_logan and yuv444to420_ni_logan filters as they do not exist
+[FFMPEG] Fix build_ffmpeg.sh issue when targeting Android on ARM32
+================================================================================
+Release version: 4.3.0_RC3
+Date: 2023-04-18            SW version: 4.3.0_RC3           FW version: 4.3.0_RC3
+Compat FW API ver: 6M       Libxcoder API ver: 2.23
+--------------------------------------------------------------------------------
+[FFMPEG] Update NETINT_FFMPEG_CHANGE_LIST.txt for v4.3.0
+[FFMPEG] In Netint filters add "is_p2p" param for outputting to P2P destination
+         Add libavcodec apiexample ni_2D_engine_p2p_test to demonstrate p2p output from Netint filter
+[FFMPEG] Fix bug in ni_quadra_scale filter processing NV16 and BGRP frames with width that is not a multiple of 8
+[FFMPEG] Add Netint HW frame drawtext filter ni_quadra_drawtext
+         Due to dependecy upon libfreetype and libfontconfig this filter must be explicitly enabled in build_ffmpeg.sh using --nidrawtext
+         Add option to use text overlay in ni_xstack libavcodec apiexample
+[FFMPEG] Fix undefined resolution rounding in ni_quadra_rotate filter by explicitly rounding odd resolutions up to nearest even number
+[FFMPEG/LIBAVCODEC] Disallow use of zero mem copy frame transfer between libavcodec and libxcoder when using 2-pass encoding and resolution is not divisible by 32
+[FFMPEG] Fix missing chroma component in output when using ni_quadra_scale to change pixfmt from semiplanar (nv12, p010le) to planar (yuv420p, yuv420p10le) then immediately using ni_quadra_hwdownload
+[FFMPEG] Add Android_quick_installer scripts to SW release package
+[FFMPEG] Fix bug compiling FFmpeg with Quadra and Logan support disabled by adding libxcoder as a dependency for Netint filters in FFmpeg configure script dependency checks
+[FFMPEG] Add support for Quadra+Logan co-existence on Windows
+[FFMPEG] In ni_quadra_overlay/avoverlay_ni_quadra filter, add support for inplace overlay for improved performance
+         - Enable functionality with param "inplace=1"
+         - Note, do not use inplace overlay after ni_split or split filter in filter graph
+         Changing FW API version to 6L
+[FFMPEG] Add AI background removal filter ni_quadra_bgr/avbgr_ni_quadra
+         This is more performant than AI background replacement filter ni_quadra_bg/avbg_ni_quadra
+         Add skip parameter to ni_quadra_bgr/avbgr_ni_quadra and ni_quadra_bg/avbg_ni_quadra filters to allow skipping AI inference for n frames
+[LIBAVCODEC] Fix incorrect values reported by FFmpeg showinfo filter for "is_key", "type", and "pos" when using Netint decoder
+             Changing libxcoder API version to 2.22
+[LIBAVCODEC] Modify xcoder_send_frame() return code:
+             - return 1 when dropping HW frames due to full encoder write buffer
+             - return 0 when encoder write buffer is full to avoid applications resending frame which has been internally enqueued in nienc
+[FFMPEG] Fix Netint decoder compatibility with FFmpeg "-stream_loop" arg
+[LIBAVCODEC] Fix handling for invalid sessionID during encoder xcoder_receive_packet()
+[FFMPEG] Support combining AI network input and output limits to a single limit of 10 for I/O
+         Changing FW API version to 6J
+[FFMPEG] Move NI pix fmt to the end of pix fmt enums for more robustness when linking to apps built with old libavutil headers
+[LIBAVCODEC] Add checks for custom gop configuration
+[FFMPEG] Fix bug preventing use of negative numbers (auto aspect ratio) in ni_scale width/height parameters in FFmpeg-n4.3+
+[FFMPEG] Fix handling for in ni_quadra_drawbox filter when drawing boxes with width/height of 0
+[FFMPEG] Support YUV444P to 2xYUV420P encoding in libxcoder app
+         This is similar to the ni_quadra_yuv444to420 filter in libavfilter
+         Refactor code from ni_quadra_yuv444to420 filter to new libxcoder function ni_util.c:ni_copy_yuv_444p_to_420p()
+[FFMPEG] Fix bug in ni_quadra_bg filter when system has multiple Quadra cards
+[FFMPEG] Fix segviolation in Gstreamer avrotate_ni_quadra filter
+[FFMPEG/LIBAVCODEC] Add support for encoding reconfig of minQpI, maxQpI, minQpPB, maxQpPB, and maxDeltaQp
+                    Changing libxcoder API version to 2.19
+[FFMPEG] For ni_quadra_drawbox filter support drawing up to 5 boxes per frame
+         Changing FW API version to 6H
+         Changing libxcoder API version to 2.18
+[LIBAVCODEC] Add checks for unsupported features on jpeg and av1 encoders
+             - add checks for invalid feature+codec combinations in libxcoder
+             - add checks for use of DolbyVision on unsupported FFmpeg versions
+             - disable xcoder-param "repeatHeaders" for JPEG encoder
+[FFMPEG] Fix stream loss when scaling to non-32 aligned horizontal stride, then converting to BGRP format, and then hwdownloading the BGRP frame
+[LIBAVCODEC] Make error messages more clear when encoder open session fails due to invalid parameters detected by FW
+[FFMPEG] Add drawbox, rotate, and xstack to ni_rsrc_list description of quadra capabilites
+         Fix description for bg filter in FFmpeg "-filters" output
+[FFMPEG] Add mpegts support for maximum bitrate descriptor for Program Map Table, in program info and each elementary stream info section
+================================================================================
+Release version: 4.2.1_RC1
+Date: 2023-01-17            SW version: 4.2.1_RC1           FW version: 4.2.1_RC1
+Compat FW API ver: 6F       Libxcoder API ver: 2.15
+--------------------------------------------------------------------------------
+[FFMPEG] Add support for multi-threaded filter
+         Multi-threaded filtering will no longer result in "ERROR ni_decoder_session_read_desc(): Oversized metadata!" symptom
+         Changing libxcoder API version to 2.15
+================================================================================
+Release version: 4.2.0_RC5
+Date: 2023-01-13            SW version: 4.2.0_RC5           FW version: 4.2.0_RC3
+Compat FW API ver: 6F       Libxcoder API ver: 2.14
+--------------------------------------------------------------------------------
+[FFMPEG] Update NETINT_FFMPEG_CHANGE_LIST.txt for v4.2.0
+[LIBAVCODEC] Fix order of HDR10 mastering display primaries values order in SEI during h264 encoding
+             Change from FFmpeg's RGB order to h264 standard's BGR order when constructing h264 mastering display aux data in nienc.c
+[LIBAVCODEC] Fix PTS calculation inaccuracy decoding VFR stream for frames received from decoder after flushing begins
+             For more details see: "APPS564-Codensity QUADRA PTS App Note v2.0.pdf" chapter 5.4
+             Changing FW API version to 6D
+[LIBAVCODEC] Fix Gstreamer frame loss when transcoding with HW frames
+[FFMPEG] Add a check in ni_quadra_rotate to not exceed the maximum resolution of 8192x8192
+[LIBAVCODEC] Fix bug preventing JPEG decode in Gstreamer
+[FFMPEG] For ni_quadra_yuv444to420 and ni_quadra_yuv420to444 filters, add 'mode' arg to select between different splitting modes
+         Old splitting mode=1 has independently viewable output0 (yuv420p format)
+         New splitting mode=0 (default) alleviates horizontal joining line in middle of frame when height is not multiple of 32 and bitrate is not high
+[LIBAVCODEC] Fix small memory leak caused by when session open or write fails in FFmpeg-n4.3.1+
+[FFMPEG] Add support for ni_quadra_drawbox filter
+         Changing FW API version to 6B
+[FFMPEG] Fix incorrect overlay position (off screen) in ni_quadra_overlay filter when input is HW frame from decoder
+[FFMPEG] Fix memory leak when ni_quadra_rotate filter exits due to unsupported rotation angle
+[LIBAVCODEC] Added support to libxcoder and libavcodec to specify a Quadra card by its NVMe block name instead of its dec/enc index
+[LIBAVCODEC] Add support for maxFrameSize reconfig
+             Changing libxcoder API version to 2.12
+             Changing FW API version to 6A
+[LIBAVCODEC] Fix buffer overflow in stream header handling when size of headers exceek 1KB
+             Improve stream header handling efficiency             
+[LIBAVCODEC] Treat FF_PROFILE_UNKNOWN as unsupported profile for Netint decoders
+[FFMPEG/LIBAVCODEC] Full tiled transcoding support:
+                    - Adds tiled decoding
+                    - Enable with decoder xcoder-params semiplanar0=2
+                    - Improves 8k60 10bit performance when used in conjunction with hardware transcoding
+                    Changing Libxcoder API version number to 2.10
+                    Changing FW API version number to 68
+[FFMPEG] Fix incorrect PTS calculation for mpeg and mpegts format by restoring 33bit PTS buffer for only those formats
+================================================================================
+Release version: 4.1.0_RC4
+Date: 2022-10-18            SW version: 4.1.0_RC4           FW version: 4.1.0_RC1
+Compat FW API ver: 67       Libxcoder API ver: 2.8
+--------------------------------------------------------------------------------
+[FFMPEG/LIBAVCODEC] Fix memory leaks during HW frames and sequence change
+[LIBAVCODEC] Support Netint tile parallelism codec on single card
+[FFMPEG/LIBAVCODEC] Add HW AVFrame support to gstreamer enc/dec
+[FFMPEG/LIBAVCODEC] Make decoders advertise their supported pixel formats
+                    ni_quadra_pad filter to reject BGRP and YUYV422/UYVY422
+                    Specify support for only YUV420P10LE instead of YUV420P10
+[FFMPEG] In ni_xstack filter, round up x, y, w, h values to nearest even number to avoid
+         odd dimensions in target buffer
+[FFMPEG/LIBAVCODEC] Add NETINT_FFMPEG_CHANGE_LIST.txt and correct minor discrepancies between different FFmpeg versions
+[FFMPEG] Add ni_quadra_rotate filter
+         Changing libxcoder API version to 67
+[LIBAVCODEC] Reassign decoder output pixel format to yuvj420p if full range color
+             Add the gray scale support for Jpeg dec
+             Add AV_PIX_FMT_YUVJ420P for quadra av1, h264, and hevc
+[LIBAVCODEC] Increase query loops in encoder read when write buffer full
+[LIBAVCODEC] Add customSeiPassthru and enableUserDataSeiPassthru to decoder's xcoder-params
+             Remove nvme_io_size from decoder's xcoder-params
+             Changing libxcoder API version to 2.8
+[FFMPEG] ni_quadra_xstack will report VFR output format downstream
+         If the sync input finishes early, the ni_quadra_xstack filter will re-sync to another input
+[LIBAVCODEC] Fix AV1 non-8x8-aligned resolution with ROI cause failure
+[FFMPEG] Added handling for extra trailing colons in -xcoder-params
+[FFMPEG] Fix frame loss in ni_overlay filter when overlaypic is null
+[LIBAVCODEC] Fix cases where output bitrate different than set bitrate when encoding VFR
+             Changing libxcoder API version to 2.7
+[FFMPEG/LIBAVCODEC] Add FFmpeg-n5.0
+[FFMPEG] Move libxcoder from FFmpeg GPL library list to permissive libray list for compiling
+[FFMPEG/LIBAVCODEC] Add Gstreamer plugin gstavhwuploadniquadra to upload HW frames to Quadra
+                    Add Gstreamer plugin gstavhwdownloadniquadra to download HW frames from Quadra
+                    Add Gstreamer plugin gstavscaleniquadra to access Quadra HW scaling filter
+[FFMPEG] Add libavcodec API examples ni_encode_ai_test.c and ni_transcode_ai_test.c
+[FFMPEG] Fix frame loss when using intraRefreshDuration
+[FFMPEG] Fix color mishandling in ni_yu420to444 and ni_yuv444to420 filters
+[LIBAVCODEC] Fix bug where decoder dropping frame does not free the frame's memory
+[LIBAVCODEC] Fix metadata not configured correctly when encoding sequence smaller than 144*128
+[LIBAVCODEC] Only allow YUVJ420P input for jpeg_ni_enc as it requires full color space
+[LIBAVCODEC] Add support for defining HEVC HDR Mastering Display Colour Volume SEI through xcoder-params
+             Changing FW API version to 65
+             Changing libxcoder API version to 2.6
+[FFMPEG] Add parameter to ni_xstack filter to specify which input to sync framerate to
+         Default is the first input
+[LIBAVCODEC] Force IDR on reconfig BR, reset sei send check
+             Changing libxcoder API version to 2.5
+================================================================================
+Release version: 4.0.0_RCB
+Date: 2022-08-05            SW version: 4.0.0_RCB           FW version: 4.0.0_RCA
+Compat FW API ver: 64       Libxcoder API ver: 2.4
+--------------------------------------------------------------------------------
+[FFMPEG/LIBAVCODEC] Add support for accessing Quadra APIs and Logan APIs through same application code
+                    - libxcoder_logan folder contains logan's libxcoder code
+                    - FFmpeg/Libavcodec contains both quadra and logan code
+                      - use build_ffmpeg.sh options '--quadra' or '--logan'
+                      - build_ffmpeg.sh defaults to compile quadra when neither '--logan' and '--quadra' are specified
+                      - codec names have been changed to contain chip name (eg. h264_ni_quadra_enc)
+                    - Logan function/struct/var/etc names in APIs have been made unique (added 'logan' in name) so they can be imported into same application with Quadra libxcoder
+[LIBAVCODEC] Check supported profile idc before decoding
+[FFMPEG] Add acquire+rety mechanism for filter buffer
+[LIBAVCODEC] Fix freeze during HW frame transcoding by not buffering nienc's input frames when write buffer full
+[LIBAVCODEC] Fix global variable DLL exporting
+[FFMPEG/LIBAVCODEC] Add zero byte frame copy feature built into FFmpeg API with nienc support
+                    Add libavcodec apiexample ni_multi_thread_lowdelay_encode.c
+[FFMPEG] Add filter colour range warning if filter receives full-range YUV
+         Always set the colour range field in filter output frame to limited
+[FFMPEG/LIBAVCODEC] Enable custom sei passthru and support error concealment for SEI after VCL NAL unit
+[FFMPEG/LIBAVCODEC] Port decoder/encoder gstreamer support from T408 to Quadra
+[FFMPEG] Implement 50-input compositor by cascading 8 x 8-input in-place overlay operations
+         Changing FW API version to 64
+         Changing libxcoder API version to 24
+[FFMPEG] Add yuyv/uyuv/nv16/bgrp/rgba/argb/bgra/abgr/bgr0 format support for netint filter
+[LIBAVCODEC] Enable the support of VUI reconfiguration
+             Add new reconfigurable parameter videoFullRange
+             Changing FW API version to 63
+             Changing libxcoder API version to 23
+[LIBAVCODEC] Add encoder SSIM calculation and reporting through xcoder-param "enableSSIM=1"
+             Changing FW API version to 62
+             Changing libxcoder API version to 22
+[FFMPEG] When uploading RGBA, 2D engine requires that frames must have a 16 pixel width alignment and a 64-byte stride
+[LIBAVCODEC] Add FFmpeg and libxcoder support for decoder low-delay
+              - Enable low delay mode with -xcoder-param "lowdelay=1" or ffmpeg param "-low_delay 1"
+              - FFmpeg parses header for frame order and disables low_delay if input packets is out of order
+              - Low delay mode makes use of busy-query on decoder read
+              Changing FW API version to 61
+[LIBAVCODEC] Fix FFmpeg error exit when pictures are skipped by modifying receive packet not to return EAGAIN when picture are skipped during flush
+[FFMPEG] Fix ni_rsrc_mon Share_Mem non-zero failure, caused by ni_hwupload instance not closed when user sets device id -1
+[FFMPEG] Set fixed_frame_rate_flag to 1 when encoding CFR bitstream
+[LIBAVCODEC] Support VFR in Quadra same as T408
+[LIBAVCODEC] Reject attempts to decode unsupported pix_fmts
+[LIBAVCODEC] Fix SPS->VUI->video_range_full_flag not set properly
+[FFMPEG/LIBAVCODEC] Add support for Netint HEVC multi-tile codec
+[FFMPEG] Add software filters to support YUV444 encoding/decoding
+         To support yuv444p format encoding, we need to implement two filters yuv444to420 and yuv420to444.
+         At the encoding end, the input data in yuv444 format is divided into two streams through the filter ‘yuv444to420’ and then encoded.
+         At the decoding end, after decoding the two streams, the yuv444 data is synthesized through the filter ‘yuv420to444’
+         Currently, we have implemented the software solution and the commands are as follows:
+           encoder：
+             ./ffmpeg -y -loglevel trace -f rawvideo -pix_fmt yuv444p -s:v 1920x1080 -i ~/Dinner_1920x1080p30_300_444.yuv -filter_complex yuv444to420[a][b] -map '[a]' -c:v h264_ni_enc ./1.h264 -map '[b]' -c:v h264_ni_enc ./2.h264
+           decoder：
+             ./ffmpeg -y -loglevel trace -c:v h264_ni_dec -i ./1.h264 -c:v h264_ni_dec -i ./2.h264 -filter_complex 'yuv420to444' -c:v rawvideo ./output_444.yuv
+[LIBAVCODEC] Add errorneous configuration detection for "-enc_time_base -1"
+[FFMPEG] Add keep alive timeout configuration for upload + 2D sessions
+[LIBAVCODEC] Fix list of supported pix_fmt in jpeg encoder
+[LIBAVCODEC] Deprecate NI_MAX_HWDESC_FRAME_INDEX in favour of NI_GET_MAX_HWDESC_FRAME_INDEX(x)
+             Changing FW API version to 55
+[LIBAVCODEC] Restrict minimal encoding resolution of jpeg to 48x48, AV1 to 144x128
+================================================================================
+Release version: 3.1.0_RC7
+Date: 2022-05-18            SW version: 3.1.0_RC7           FW version: 3.1.0_RC6
+Compat FW API ver: 54       Libxcoder API ver: 2.0
+--------------------------------------------------------------------------------
+[FFMPEG] Tidy up public API structures and remove privately used structs:
+         Remove ni_card_info_t as it is unused
+         Move ni_nvme_command_t to ni_nvme.h as it is only used internally
+         Do not export ni_bitstream.h to public API
+         Move latency measurement functions/definitions from ni_util.c/h to ni_lat_meas.c/h to make private
+         Add ni_lat_meas_q_destroy()
+         Add comment to ni_device_t to store in heap
+         Move ni_resolution_t definition to ni_device_api_priv.h
+         Remove ni_populate_serial_number() and ni_serial_num struct
+[LIBAVCODEC] Support sequence change by config new resolution instead of close / open encoder instance, if resolution changes from large to small
+             Add FW API version check, reject sequence change if running FW API <54
+[LIBAVCODEC] Support AV1 non-8x8-aligned resolution
+             Changing FW API version to 54
+[LIBAVCODEC] API to allocate packet buffer using a user provided pointer.
+             Adding use of temporary aligned buffer if unaligned memory is provided in nvme reads and writes
+[FFMPEG] Extend ni_rsrc_list to list uninitialized cards
+         - An optional `-a` command line flag, when specified,
+           lists initialized and uninitialized Quadra cards.
+         - Uninitialized Quadra cards will not include device
+           capability prints.
+         - Serial number and model number are now processed by
+           ni_rsrc_list_all_devices()
+[LIBAVCODEC] Remove -hwframes decoder parameter
+[LIBAVCODEC] Remove yuv420p12le as supported format from encoder
+[LIBAVCODEC] Release frame buffer when opening encoder fails
+[FFMPEG] Reduce likelihood of memorybin leakage
+[LIBAVCODEC] Return EOF in xcoder_send_frame() when nothing to encode
+             to prevent errant output
+[LIBAVCODEC] Adding ni_encoder_sw_frame_buffer_alloc() API to be used
+             to allocate either planar or semi planar frames.
+             Encoding type detection logic taken from
+             ni_device_session_acquire()
+[LIBAVCODEC] Harden -xcoder-params for NI decoder
+[FFMPEG] Various FATE fixes
+         - add bgrp entry for AV_PIX_FMT_BGRP to tests/ref/fate/sws-pixdesc-query
+         - add copyright notice to libavfilter/vf_roi_ni.c
+         - redefine header guards to adhere to FFmpeg's standard
+         - revert e7389922 to pass fate-lavf-mpg and fate-seek-lavf-mpg
+================================================================================
+Release version: 3.0.0_RC2
+Date: 2022-04-15            SW version: 3.0.0_RC2           FW version: 3.0.0_RC2
+--------------------------------------------------------------------------------
+[LIBAVCODEC] FFmpeg 4.4 AV1 encode test timeout
+             1. Change FFmpeg 4.4 implementation not to always send frame before receive packet, which caused long delay in AV1 encode
+================================================================================
+Release version: 3.0.0_RC1
+Date: 2022-04-13            SW version: 3.0.0_RC1           FW version: 3.0.0_RC1
+--------------------------------------------------------------------------------
+[LIBAVCODEC] Exit process with invalid reconfig file
+[FFMPEG/LIBAVCODEC] Use recursive mutex for Xcoder open/close API
+[LIBAVCODEC] Add null-pointer check to frame in nienc.c for segfault fix
+[FFMPEG] Integrate ni_pthread API
+[FFMPEG] FFmpeg support of uploader auto load balancing
+[FFMPEG] Fix hw uploader free issue on Windows
+[FFMPEG] Replace NI_MAX_SW_INSTANCE_COUNT with NI_MAX_CONTEXTS_PER_HW_INSTANCE
+         Rename NI_MAX_PROFILE_NAME_LEN, NI_MAX_LEVEL_NAME_LEN, NI_MAX_ADDITIONAL_INFO_LEN to NI_PROFILES_SUPP_STR_LEN, NI_LEVELS_SUPP_STR_LEN, NI_LEVELS_SUPP_STR_LEN
+         Replace NI_MAX_HW_XCODER_COUNT and MAX_DEVICE_CNT with NI_MAX_DEVICE_CNT
+         Change MAX_DEVICE_NAME_LEN to NI_MAX_DEVICE_NAME_LEN and move its definition to ni_defs.h
+         Remove NI_MAX_CONTEXTS_PER_DECODER_INSTANCE as it is unused and confusing
+[LIBAVCODEC] Fix segfault of soft scaler during low resolution encode
+[FFMPEG] Update device scan algorithm in libavutil/hwcontext_ni_quad.c
+[FFMPEG/LIBAVCODEC] Port windows msys fix
+                    - fix yuvbypass failure on windows and disable p2p on windows
+                    - fix false mem-free extradata
+                    - set max_nvme_io_size to NI_MAX_PACKET_SZ on Windows,
+                      max_nvme_io_size will be used to allocate p_leftover buffer,
+                      fix allocation of p_leftover buffer to 0.
+                    - fix filter open device failure on Windows
+                    - fix free hw buffer issue on Windows
+                    - fix compiling issues
+[FFMPEG] Add support for android
+[FFMPEG] Send 1 NVME command to Scaler instead of 3 Optimizes scaler by reducing ConfigInput and
+         ConfigOutput tranfers to occuring only when needed.
+[FFMPEG] Parallel instance upload
+         - Upload instance no longer takes up encoder instance
+         - Limit of 128 upload instances
+         Changing API version to 40
+[FFMPEG/LIBAVCODEC] Port for session keep alive timeout command line option from t408
+                    * Changing keep alive timeout from 3 to 15. this now matches the default in FW
+                    * Updating gitignore to ignore some files in doc/, taken from 4.3.1/doc/.gitignore
+                    * Adding keep_alive_timeout option to xcoder params as keepAliveTimeout. ni_en/decoder_params_set_value() functions replace _ with -
+                    * Adding timeout option to netint avfilters
+                    * Updating ni_session_keep_alive_thread() to use close_thread flag instead of pthread_cancel(), same as t408.
+[FFMPEG/LIBAVCODEC] Port ni_log.c from T408
+[LIBAVCODEC] When the roi enable, even if roi_demo_mode is zero, we should also add the sizeof(ni_encoder_change_params_t) in extra_data_len
+             Fix the set_qp error: set the set_qp type int32_t, because there will be forced type conversion later
+[LIBAVCODEC] Fix AV1 pic skip encode fail & AV1 frame loss when PTS is repeated
+             1. Fix skipping frame cause AV1 encode fail by not output packet if frame is skipped
+             2. Fix repeated PTS cause AV1 frame loss by modifying packet merge to be based on show frame info
+             Changing API version to 30
+[FFMPEG/LIBAVCODEC] Remove extra debug printouts introduced during development of HW filters
+                    Small changes to make the filters from different FFmpeg versions identical
+[FFMPEG] Fix Overcapacity test issues
+         1. Fix libxcoder does not wait for keepalive thread terminated before session close, causing nvme IO error
+         2. Fix filter session not closed if session ID is 0, causing session timeout
+[FFMPEG/LIBAVCODEC] Add FFmpeg-n4.4
+[LIBAVCODEC] Remove not required reconfig modes & Add AV1 height constraint
+             1. Remove no rqeuired reconfig modes 2 (Intra QP / Intra Period), 3 (VUI), 5 (RC Vbv Size / CU Level RC), 6 (Min / Max QP)
+             2. For AV1 add check condition to make sure height <= 4352 (MaxVSize supported by AV1 level 5.1)
+[FFMPEG/LIBAVCODEC] Modify compile and configure script to support windows build
+                    replace usleep() with ni_usleep()
+                    add changes required by cppcheck and clang-format
+[LIBAVCODEC] Fixed segmentation fault caused from ff_xcoder_dec_close() in T2 spike test
+[LIBAVCODEC] Remove '-xcoder' parameter
+             - Remove "BEST" column for ni_rsrc_mon
+[FFMPEG] Support in ffmpeg by adding a new command line
+         parameter to enable the scaler instance to use
+         filterblit.
+[FFMPEG] Add background removing filter
+[FFMPEG] Add api for tensor and data conversion
+================================================================================
+Release version: 2.3.0_RC1
+Date: 2022-02-28            SW version: 2.3.0_RC1           FW version: 2.3.0_RC1
+--------------------------------------------------------------------------------
+[LIBAVCODEC] Support reconfig framerate, Add rcQpDeltaRange
+             1. Support reconfig framerate, including reconfDemoMode 9, libxcoder aux data, wrapper API
+             2. Reject framerate larger than max threshold 65535
+             3. Add rcQpDeltaRange in config parameter
+             Changing API version to 20
+[FFMPEG] Unify device open in Filters with rsrc_api
+[FFMPEG/LIBAVCODEC] Improve encoder config naming and placement
+                    -ni_encoder_params_t -> ni_xcoder_params_t
+                    -hevc_enc_params -> cfg_enc_params
+                    -ni_h265_encoder_params_t -> ni_encoder_cfg_params_t
+                    -Reordered the encoder_cfg_params by compatibility
+================================================================================
+Release version: 2.2.1_EN1
+Date: 2022-02-11            SW version: 2.2.1_EN1           FW version: 2.2.0_EN1
+--------------------------------------------------------------------------------
+================================================================================
+Release version: 2.2.0_EN1
+Date: 2022-01-29            SW version: 2.2.0_EN1           FW version: 2.2.0_EN1
+--------------------------------------------------------------------------------
+================================================================================
+Release version: 2.2.0_RC2
+Date: 2022-01-25            SW version: 2.2.0_RC2           FW version: 2.2.0_RC2
+--------------------------------------------------------------------------------
+================================================================================
+Release version: 2.2.0_RC1
+Date: 2022-01-22            SW version: 2.2.0_RC1           FW version: 2.2.0_RC1
+--------------------------------------------------------------------------------
+[LIBAVCODEC] Added wrapper API and demo modes for LTR
+[FFMPEG/LIBAVCODEC] API rename and added comments
+[FFMPEG] Add debug info to FFMpeg
+         Add file descriptor information to the hwcontext driver for
+         debugging purposes.
+[FFMPEG/LIBAVCODEC] FFmpeg to use refactored libxcoder API, 4.3.1 only
+                    fixed an xcoder memory leak of mutex
+                    ported demo modes to xcoder and adjusted ROI demo in FFmpeg versions
+================================================================================
+Release version: 2.1.0_RC1
+Date: 2022-01-14            SW version: 2.1.0_RC1           FW version: 2.1.0_RC1
+--------------------------------------------------------------------------------
+[LIBAVCODEC] Fix memory leak issue for quadra
+[FFMPEG/LIBAVCODEC] Libxcoder API name and description cleanup to match doc
+[LIBAVCODEC] Make libxcoder API thread-safe
+[LIBAVCODEC] Fix libxcoder mem leak and HDR10+ SEI in libavcodec
+[FFMPEG/LIBAVCODEC] Support LTR & short term / long term reference invalidation
+                    1. Support config LTR enable and LTR interval
+                    2. Support reconfig LTR interval
+                    3. Support side data and metadata for setting LTR on frame basis
+                    4. Support reconfig parameter for short term / long term reference invalidation
+[FFMPEG] Make FFmpeg crop filter will reject hardware frames
+[FFMPEG] Add support for FFmpeg-n4.3.1
+================================================================================
+Release version: 1.2.0
+Date: 2021-11-03            SW version: 1.2.0               FW version: 1.2.0
+--------------------------------------------------------------------------------
+[FFMPEG/LIBAVCODEC] Initial general availability
