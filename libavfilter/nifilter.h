@@ -55,6 +55,10 @@
     ((LIBAVFILTER_VERSION_MAJOR > 10) ||                                      \
      (LIBAVFILTER_VERSION_MAJOR == 10 && LIBAVFILTER_VERSION_MINOR >= 1))
 
+#define IS_FFMPEG_71_AND_ABOVE                                                \
+    ((LIBAVFILTER_VERSION_MAJOR > 10) ||                                      \
+     (LIBAVFILTER_VERSION_MAJOR == 10 && LIBAVFILTER_VERSION_MINOR >= 4))
+
 #define DEFAULT_NI_FILTER_POOL_SIZE     4
 
 #define FRAMESYNC_OPTIONS                                                                                                                      \

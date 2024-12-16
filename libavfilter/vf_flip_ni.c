@@ -29,10 +29,14 @@
 
 #include "libavutil/opt.h"
 
+#include "nifilter.h"
 #include "filters.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
-#include "nifilter.h"
+#else
+#include "libavutil/mem.h"
+#endif
 
 typedef struct NetIntFlipContext {
     const AVClass *class;
@@ -139,7 +143,14 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
         return AVERROR(EINVAL);
     }
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *) li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     if (ctx->inputs[0]->hw_frames_ctx == NULL) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
@@ -184,6 +195,16 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
 
     av_hwframe_ctx_init(flip->out_frames_ref);
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(ctx->outputs[0]);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(flip->out_frames_ref);
+
+    if (!lo->hw_frames_ctx)
+    {
+        return AVERROR(ENOMEM);
+    }
+#else
     av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
     ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(flip->out_frames_ref);
 
@@ -191,6 +212,7 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
     {
         return AVERROR(ENOMEM);
     }
+#endif
 
     return 0;
 }

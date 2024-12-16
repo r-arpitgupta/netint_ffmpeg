@@ -27,10 +27,15 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "nifilter.h"
+#include "version.h"
 #include "filters.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
-
+#else
+#include "libavutil/mem.h"
+#endif
  // Needed for FFmpeg-n4.3+
 #if (LIBAVFILTER_VERSION_MAJOR >= 8 || LIBAVFILTER_VERSION_MAJOR >= 7 && LIBAVFILTER_VERSION_MINOR >= 85)
 #include "scale_eval.h"
@@ -46,7 +51,6 @@
 #include "libavutil/parseutils.h"
 #include "libavutil/avassert.h"
 #include "libswscale/swscale.h"
-#include "nifilter.h"
 
 enum OutputFormat {
     OUTPUT_FORMAT_YUV420P,
@@ -233,7 +237,14 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
             s->box_rgba_color[0][R], s->box_rgba_color[0][G], s->box_rgba_color[0][B], s->box_rgba_color[0][A]);
     }
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     if (ctx->inputs[0]->hw_frames_ctx == NULL) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
@@ -353,7 +364,10 @@ static int config_props(AVFilterLink *outlink, AVFrame *in)
         return AVERROR(EINVAL);
     }
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
 #else
     in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
@@ -405,11 +419,20 @@ static int config_props(AVFilterLink *outlink, AVFrame *in)
 
     av_hwframe_ctx_init(drawbox->out_frames_ref);
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(ctx->outputs[0]);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(drawbox->out_frames_ref);
+
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
     ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(drawbox->out_frames_ref);
 
     if (!ctx->outputs[0]->hw_frames_ctx)
         return AVERROR(ENOMEM);
+#endif
 
     return 0;
 

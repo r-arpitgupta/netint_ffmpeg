@@ -45,14 +45,16 @@
 #include "avfilter.h"
 #include "audio.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
+#else
+#include "filters.h"
+#endif
 #include "video.h"
 
 typedef struct SplitContext {
     const AVClass *class;
-#if !IS_FFMPEG_342_AND_ABOVE
     bool initialized;
-#endif
     int nb_output0;
     int nb_output1;
     int nb_output2;
@@ -75,7 +77,15 @@ static int init_out_hwctxs(AVFilterContext *ctx, AVFrame *in)
     enum AVPixelFormat out_format;
     int i, j;
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     if (ctx->inputs[0]->hw_frames_ctx == NULL) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
@@ -129,6 +139,30 @@ static int init_out_hwctxs(AVFilterContext *ctx, AVFrame *in)
         }
 
         for (i = 0; i < ctx->nb_outputs; i++) {
+#if IS_FFMPEG_71_AND_ABOVE
+            FilterLink *lo = ff_filter_link(ctx->outputs[i]);
+            av_buffer_unref(&lo->hw_frames_ctx);
+            if (i < s->nb_output0) {
+                j = 0;
+            } else if (i < s->nb_output0 + s->nb_output1) {
+                j = 1;
+            } else {
+                j = 2;
+            }
+            lo->hw_frames_ctx =
+                av_buffer_ref(s->out_frames_ref[j]);
+
+            av_log(ctx, AV_LOG_DEBUG, "NI:%s:out\n",
+                   (s->src_ctx.f[j] == 0)
+                       ? "semiplanar"
+                       : (s->src_ctx.f[j] == 2) ? "tiled" : "planar");
+            if (!lo->hw_frames_ctx)
+                return AVERROR(ENOMEM);
+
+            av_log(ctx, AV_LOG_DEBUG,
+                   "ni_split superframe config_output_hwctx[%d] %p\n", i,
+                   lo->hw_frames_ctx);
+#else
             av_buffer_unref(&ctx->outputs[i]->hw_frames_ctx);
             if (i < s->nb_output0) {
                 j = 0;
@@ -150,9 +184,23 @@ static int init_out_hwctxs(AVFilterContext *ctx, AVFrame *in)
             av_log(ctx, AV_LOG_DEBUG,
                    "ni_split superframe config_output_hwctx[%d] %p\n", i,
                    ctx->outputs[i]->hw_frames_ctx);
+#endif
         }
     } else { // no possibility of using extra outputs
         for (i = 0; i < ctx->nb_outputs; i++) {
+#if IS_FFMPEG_71_AND_ABOVE
+            FilterLink *lo = ff_filter_link(ctx->outputs[i]);
+            av_buffer_unref(&lo->hw_frames_ctx);
+            if (i < s->nb_output0) {
+                lo->hw_frames_ctx =
+                    av_buffer_ref(li->hw_frames_ctx);
+            }
+            if (!lo->hw_frames_ctx)
+                return AVERROR(ENOMEM);
+
+            av_log(ctx, AV_LOG_DEBUG, "ni_split config_output_hwctx[%d] %p\n",
+                   i, lo->hw_frames_ctx);
+#else
             av_buffer_unref(&ctx->outputs[i]->hw_frames_ctx);
             if (i < s->nb_output0) {
                 ctx->outputs[i]->hw_frames_ctx =
@@ -163,6 +211,7 @@ static int init_out_hwctxs(AVFilterContext *ctx, AVFrame *in)
 
             av_log(ctx, AV_LOG_DEBUG, "ni_split config_output_hwctx[%d] %p\n",
                    i, ctx->outputs[i]->hw_frames_ctx);
+#endif
         }
         av_log(ctx, AV_LOG_DEBUG,
                "ni_split config_output_hwctx set direct to output\n");
@@ -312,7 +361,10 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
     // inlink->hw_frames_ctx);
     int i;
     s->frame_contexts_applied = -1;
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if (li->hw_frames_ctx == NULL)
+#elif IS_FFMPEG_342_AND_ABOVE
     if (inlink->hw_frames_ctx == NULL)
 #else
     if (in->hw_frames_ctx == NULL)
@@ -325,7 +377,9 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
             s->src_ctx.f8b[i] = -1;
         }
     } else {
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+        ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
         ctx = (AVHWFramesContext *)inlink->hw_frames_ctx->data;
 #else
         ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
@@ -363,6 +417,15 @@ static int filter_ni_frame(AVFilterLink *inlink, AVFrame *frame)
     int i, ret = AVERROR_EOF;
     int output_index;
     niFrameSurface1_t *p_data3;
+
+    if (!s->initialized) {
+        for (i = 0; i < 3; i++) {
+            ff_ni_clone_hwframe_ctx((AVHWFramesContext *)frame->hw_frames_ctx->data, 
+                                    (AVHWFramesContext *)s->out_frames_ref[i]->data,
+                                    NULL);
+        }
+        s->initialized = 1;
+    }
 
     for (i = 0; i < ctx->nb_outputs; i++)
     {

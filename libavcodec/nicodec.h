@@ -57,6 +57,14 @@ enum {
     HW_FRAMES_ON = 1
 };
 
+#if LIBAVCODEC_VERSION_MAJOR >= 60
+typedef struct OpaqueData {
+    int64_t pkt_pos;
+    void *opaque;
+    AVBufferRef *opaque_ref;
+} OpaqueData;
+#endif
+
 typedef struct XCoderH264DecContext {
   AVClass *avclass;
 
@@ -91,6 +99,13 @@ typedef struct XCoderH264DecContext {
   int is_lone_sei_pkt;
   int eos;
   AVHWFramesContext    *frames;
+
+#if LIBAVCODEC_VERSION_MAJOR >= 60
+  /* for temporarily storing the opaque pointers when AV_CODEC_FLAG_COPY_OPAQUE is set */
+  OpaqueData *opaque_data_array;
+  int opaque_data_nb;
+  int opaque_data_pos;
+#endif
 
   /* below are all command line options */
   char *xcoder_opts;

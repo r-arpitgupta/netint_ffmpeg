@@ -23,9 +23,14 @@
 #include "libavutil/log.h"
 #include "libavutil/opt.h"
 
+#include "version.h"
 #include "avfilter.h"
 #include "formats.h"
+#if !(LIBAVFILTER_VERSION_MAJOR > 10 || (LIBAVFILTER_VERSION_MAJOR == 10 && LIBAVFILTER_VERSION_MINOR >= 4))
 #include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #include "video.h"
 
 typedef struct NiUploadContext {
@@ -134,9 +139,16 @@ static int niupload_config_output(AVFilterLink *outlink)
     if (ret < 0)
         return ret;
 
+#if (LIBAVFILTER_VERSION_MAJOR > 10 || (LIBAVFILTER_VERSION_MAJOR == 10 && LIBAVFILTER_VERSION_MINOR >= 4))
+    FilterLink *lo = ff_filter_link(outlink);
+    lo->hw_frames_ctx = av_buffer_ref(s->hwframe);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     outlink->hw_frames_ctx = av_buffer_ref(s->hwframe);
     if (!outlink->hw_frames_ctx)
         return AVERROR(ENOMEM);
+#endif
 
     return 0;
 }

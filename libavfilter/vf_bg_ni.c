@@ -27,15 +27,19 @@
 #include "libavutil/opt.h"
 #include "libswscale/swscale.h"
 
+#include "nifilter.h"
 #include "filters.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #if HAVE_IO_H
 #include <io.h>
 #endif
 #include "ni_device_api.h"
 #include "ni_util.h"
-#include "nifilter.h"
 #include "video.h"
 
 #include "libavutil/avassert.h"
@@ -581,7 +585,10 @@ static int nibg_config_output(AVFilterLink *outlink, AVFrame *in)
 
     av_buffer_unref(&s->hwframe);
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if(li->hw_frames_ctx == NULL) {
+#elif IS_FFMPEG_342_AND_ABOVE
     if (inlink->hw_frames_ctx == NULL) {
 #else
     if (in->hw_frames_ctx == NULL) {
@@ -598,7 +605,9 @@ static int nibg_config_output(AVFilterLink *outlink, AVFrame *in)
 
     av_log(ctx, AV_LOG_DEBUG, "outlink wxh %dx%d\n", outlink->w, outlink->h);
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     in_frames_ctx = (AVHWFramesContext *)inlink->hw_frames_ctx->data;
 #else
     in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
@@ -631,11 +640,19 @@ static int nibg_config_output(AVFilterLink *outlink, AVFrame *in)
 
     av_hwframe_ctx_init(s->out_frames_ref);
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(outlink);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     av_buffer_unref(&outlink->hw_frames_ctx);
 
     outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
     if (!outlink->hw_frames_ctx)
         return AVERROR(ENOMEM);
+#endif
 
     return 0;
 }
@@ -1341,6 +1358,10 @@ static int nibg_filter_frame(AVFilterLink *link, AVFrame *in)
         }
 #endif
 
+        ff_ni_clone_hwframe_ctx((AVHWFramesContext *)in->hw_frames_ctx->data, 
+                                (AVHWFramesContext *)s->out_frames_ref->data,
+                                &s->ai_ctx->api_ctx);
+
         s->initialized = 1;
     }
 
@@ -1481,31 +1502,47 @@ static int activate(AVFilterContext *ctx)
 {
     AVFilterLink  *inlink = ctx->inputs[0];
     AVFilterLink  *outlink = ctx->outputs[0];
+    NiBgContext *s = ctx->priv;
     AVFrame *frame = NULL;
-    int ret;    
+    int ret = 0;
 
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
     if (ff_inlink_check_available_frame(inlink))
     {
-        // Consume from inlink framequeue only when outlink framequeue is empty, to prevent filter from exhausting all pre-allocated device buffers
+        // Consume from inlink framequeue only when outlink framequeue is empty
+        // to prevent filter from exhausting all pre-allocated device buffers
         if (ff_inlink_check_available_frame(outlink))
             return FFERROR_NOT_READY;
-    
+
+        if (s->initialized)
+        {
+            ret = ni_device_session_query_buffer_avail(&s->overlay_ctx->api_ctx, NI_DEVICE_TYPE_SCALER);
+        }
+
+        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
+        {
+            av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
+        }
+        else if (ret < 0)
+        {
+            return FFERROR_NOT_READY;
+        }
+
         ret = ff_inlink_consume_frame(inlink, &frame);
         if (ret < 0)
             return ret;
- 
+
         return nibg_filter_frame(inlink, frame);
     }
-    
+
     // We did not get a frame from input link, check its status
     FF_FILTER_FORWARD_STATUS(inlink, outlink);
 
     // We have no frames yet from input link and no EOF, so request some.
     FF_FILTER_FORWARD_WANTED(outlink, inlink);
-    
+
     return FFERROR_NOT_READY;
 }
 #endif

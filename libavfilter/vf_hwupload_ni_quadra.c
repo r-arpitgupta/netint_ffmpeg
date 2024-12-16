@@ -20,10 +20,14 @@
 #include "libavutil/log.h"
 #include "libavutil/opt.h"
 
+#include "nifilter.h"
 #include "filters.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
-#include "nifilter.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #include "video.h"
 
 typedef struct NiUploadContext {
@@ -144,7 +148,10 @@ static int niupload_config_output(AVFilterLink *outlink, AVFrame *in)
     if (inlink->format == outlink->format) {
         // The input is already a hardware format, so we just want to
         // pass through the input frames in their own hardware context.
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *li = ff_filter_link(inlink);
+        if (!li->hw_frames_ctx) {
+#elif IS_FFMPEG_342_AND_ABOVE
         if (!inlink->hw_frames_ctx) {
 #else
         if (!in->hw_frames_ctx) {
@@ -152,7 +159,12 @@ static int niupload_config_output(AVFilterLink *outlink, AVFrame *in)
             av_log(ctx, AV_LOG_ERROR, "No input hwframe context.\n");
             return AVERROR(EINVAL);
         }
-
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *lo = ff_filter_link(outlink);
+        lo->hw_frames_ctx = av_buffer_ref(li->hw_frames_ctx);
+        if (!lo->hw_frames_ctx)
+            return AVERROR(ENOMEM);
+#else
 #if IS_FFMPEG_342_AND_ABOVE
         outlink->hw_frames_ctx = av_buffer_ref(inlink->hw_frames_ctx);
 #else
@@ -160,7 +172,7 @@ static int niupload_config_output(AVFilterLink *outlink, AVFrame *in)
 #endif
         if (!outlink->hw_frames_ctx)
             return AVERROR(ENOMEM);
-
+#endif
         return 0;
     }
 
@@ -175,15 +187,27 @@ static int niupload_config_output(AVFilterLink *outlink, AVFrame *in)
     hwframe_ctx->height    = inlink->h;
     pub_ctx = (AVNIFramesContext*)hwframe_ctx->hwctx;
     pub_ctx->keep_alive_timeout = s->keep_alive_timeout;
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+     pub_ctx->framerate     = li->frame_rate;
+#else
     pub_ctx->framerate     = inlink->frame_rate;
+#endif
 
     ret = av_hwframe_ctx_init(s->hwframe);
     if (ret < 0)
         return ret;
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(outlink);
+    lo->hw_frames_ctx = av_buffer_ref(s->hwframe);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     outlink->hw_frames_ctx = av_buffer_ref(s->hwframe);
     if (!outlink->hw_frames_ctx)
         return AVERROR(ENOMEM);
+#endif
 
     return 0;
 }
@@ -254,7 +278,12 @@ static int activate(AVFilterContext *ctx)
     AVFilterLink  *outlink = ctx->outputs[0];
     AVFrame *frame = NULL;
     int ret = 0;
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(outlink);
+    AVHWFramesContext *hwfc = (AVHWFramesContext *) lo->hw_frames_ctx->data;
+#else
     AVHWFramesContext *hwfc = (AVHWFramesContext *) outlink->hw_frames_ctx->data;
+#endif
     NIFramesContext *ni_ctx = hwfc->internal->priv;
 
     // Forward the status on output link to input link, if the status is set, discard all queued frames

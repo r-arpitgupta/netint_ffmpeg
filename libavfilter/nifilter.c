@@ -30,7 +30,12 @@
 #include "avfilter.h"
 #include "nifilter.h"
 #include "formats.h"
+#if IS_FFMPEG_71_AND_ABOVE
+#include "filters.h"
+#include "libavutil/mem.h"
+#else
 #include "internal.h"
+#endif
 #include "video.h"
 #include "libavutil/eval.h"
 #include "libavutil/avstring.h"

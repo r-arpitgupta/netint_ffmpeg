@@ -18,11 +18,17 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "nifilter.h"
 #include "avfilter.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #include "libavutil/opt.h"
 #include "libavutil/macros.h"
+#include "filters.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -30,7 +36,6 @@
 #include <unistd.h>
 
 #include <stdio.h>
-#include "nifilter.h"
 #ifndef _WIN32
 #include <ni_p2p_ioctl.h>
 #include <sys/ioctl.h>
@@ -254,7 +259,13 @@ static int config_input(AVFilterLink *inlink)
 #ifndef _WIN32
     AVFilterContext *ctx = inlink->dst;
     NetIntP2PXferContext *s = ctx->priv;
-    AVHWFramesContext *frames_ctx = (AVHWFramesContext *) inlink->hw_frames_ctx->data;
+    AVHWFramesContext *frames_ctx = NULL;
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    frames_ctx = (AVHWFramesContext *) li->hw_frames_ctx->data;
+#else
+    frames_ctx = (AVHWFramesContext *) inlink->hw_frames_ctx->data;
+#endif
     AVNIDeviceContext *device_ctx = frames_ctx->device_ctx->hwctx;
     ni_retcode_t retcode = 0;
 
@@ -349,7 +360,12 @@ static int config_output(AVFilterLink *outlink)
     AVHWFramesContext *out_frames_ctx;
     int ret=0;
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    in_frames_ctx = (AVHWFramesContext *) li->hw_frames_ctx->data;
+#else
     in_frames_ctx = (AVHWFramesContext *) ctx->inputs[0]->hw_frames_ctx->data;
+#endif
 
     s->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
     if (!s->out_frames_ref)
@@ -373,12 +389,20 @@ static int config_output(AVFilterLink *outlink)
     if (ret < 0)
         return ret;
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(ctx->outputs[0]);
+    av_buffer_unref(&lo->hw_frames_ctx);
+
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
 
     ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
     if (!ctx->outputs[0]->hw_frames_ctx)
         return AVERROR(ENOMEM);
-
+#endif
     return 0;
 #else
     return AVERROR(EINVAL);

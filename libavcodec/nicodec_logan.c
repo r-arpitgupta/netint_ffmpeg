@@ -41,8 +41,14 @@
 #include "get_bits.h"
 #include "internal.h"
 #include "libavutil/intreadwrite.h"
+#if ((LIBAVCODEC_VERSION_MAJOR > 61) || (LIBAVCODEC_VERSION_MAJOR == 61 && LIBAVCODEC_VERSION_MINOR >= 19))
+#include "libavcodec/hevc/hevc.h"
+#include "libavcodec/hevc/sei.h"
+#else
 #include "libavcodec/hevc.h"
 #include "libavcodec/hevc_sei.h"
+#endif
+
 #include "libavcodec/h264.h"
 #include "libavcodec/h264_sei.h"
 #include "libavutil/hwcontext.h"

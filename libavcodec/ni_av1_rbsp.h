@@ -54,21 +54,21 @@ typedef struct AV1TileInfo {
     int tile_raw_data_pos[MAX_MUM_TILE_GROUP_OBU_PER_FRAME];
 } AV1TileInfo;
 
-void av1_bitstream_fetch(const PutBitContext *stream, AVPacket *pkt, size_t size);
-void av1_bitstream_reset(PutBitContext *stream);
-int av1_write_obu_header(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawOBUHeader *current);
-int av1_write_sequence_header_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *current);
-int av1_write_trailing_bits(CodedBitstreamContext *ctx, PutBitContext *s, int bits);
-int av1_write_le32(CodedBitstreamContext *ctx, PutBitContext *s, const char *name, uint32_t value);
-int av1_write_leb128(CodedBitstreamContext *ctx, PutBitContext *s, const char *name, uint64_t value);
-int av1_update_obu_data_length(CodedBitstreamContext *ctx, PutBitContext *s,
+void netint_av1_bitstream_fetch(const PutBitContext *stream, AVPacket *pkt, size_t size);
+void netint_av1_bitstream_reset(PutBitContext *stream);
+int netint_av1_write_obu_header(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawOBUHeader *current);
+int netint_av1_write_sequence_header_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *current);
+int netint_av1_write_trailing_bits(CodedBitstreamContext *ctx, PutBitContext *s, int bits);
+int netint_av1_write_le32(CodedBitstreamContext *ctx, PutBitContext *s, const char *name, uint32_t value);
+int netint_av1_write_leb128(CodedBitstreamContext *ctx, PutBitContext *s, const char *name, uint64_t value);
+int netint_av1_update_obu_data_length(CodedBitstreamContext *ctx, PutBitContext *s,
         int start_pos, /*AV1RawTileData *td,*/ AV1RawOBU *obu, PutBitContext *pbc_tmp, int add_trailing_bits);
-int av1_write_temporal_delimiter_obu(CodedBitstreamContext *ctx, PutBitContext *s);
+int netint_av1_write_temporal_delimiter_obu(CodedBitstreamContext *ctx, PutBitContext *s);
 #ifdef NOFRAMEOBU
-int av1_write_frame_header_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawFrameHeader *current);
-int av1_write_tile_group_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawTileGroup *current);
+int netint_av1_write_frame_header_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawFrameHeader *current);
+int netint_av1_write_tile_group_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawTileGroup *current);
 #else
-int av1_write_frame_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawFrame *current);
+int netint_av1_write_frame_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawFrame *current);
 #endif
 
 int ni_av1_write_uvlc(CodedBitstreamContext *ctx, PutBitContext *pbc, const char *name, uint32_t value, uint32_t range_min, uint32_t range_max);

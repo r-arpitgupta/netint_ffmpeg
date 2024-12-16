@@ -56,11 +56,15 @@
 #include "libavutil/tree.h"
 #include "libavutil/lfg.h"
 #include "libavutil/version.h"
+#include "nifilter.h"
 #include "filters.h"
 #include "drawutils.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
-#include "nifilter.h"
+#else
+#include "libavutil/mem.h"
+#endif
 
 #include "video.h"
 
@@ -735,7 +739,7 @@ static int load_glyph(AVFilterContext *ctx, Glyph **glyph_ptr, uint32_t code, in
 {
     NIDrawTextContext *s = ctx->priv;
     FT_BitmapGlyph bitmapglyph;
-    Glyph *glyph;
+    Glyph *glyph, dummy = { 0 };
     struct AVTreeNode *node = NULL;
     int ret;
 
@@ -744,7 +748,6 @@ static int load_glyph(AVFilterContext *ctx, Glyph **glyph_ptr, uint32_t code, in
         return AVERROR(EINVAL);
 
     /* if glyph has already insert into s->glyphs, return directly */
-    Glyph dummy = { 0 };
     dummy.code = code;
     dummy.fontsize = s->fontsize[index];
     glyph = av_tree_find(s->glyphs, &dummy, glyph_cmp, NULL);
@@ -1345,7 +1348,10 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
     outlink->w = inlink->w;
     outlink->h = inlink->h;
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
 #else
     in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
@@ -1374,18 +1380,31 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
     out_frames_ctx->initial_pool_size = NI_DRAWTEXT_ID;
 
     av_hwframe_ctx_init(s->out_frames_ref);
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(ctx->outputs[0]);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
 
+    //The upload will be per frame if frame rate is not specified/determined
+    if(li->frame_rate.den)
+        s->framerate = (li->frame_rate.num + li->frame_rate.den - 1) / li->frame_rate.den;
+#else
     av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
     ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!ctx->outputs[0]->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+
     //The upload will be per frame if frame rate is not specified/determined
     if(inlink->frame_rate.den)
         s->framerate = (inlink->frame_rate.num + inlink->frame_rate.den - 1) / inlink->frame_rate.den;
+#endif
+
     if(s->framerate == 0)
         s->framerate = 1;
     av_log(ctx, AV_LOG_INFO, "overlay frame upload frequency %d\n", s->framerate);
 
-    if (!ctx->outputs[0]->hw_frames_ctx)
-        return AVERROR(ENOMEM);
     return 0;
 }
 
@@ -1471,7 +1490,7 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
     AVFilterContext *ctx = inlink->dst;
     NIDrawTextContext *s = ctx->priv;
     char *expr;
-    int i, ret;
+    int i, ret, flags;
     AVHWFramesContext *in_frames_ctx;
 
 #if !IS_FFMPEG_342_AND_ABOVE
@@ -1480,7 +1499,14 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
         return 0;
 #endif
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     if (ctx->inputs[0]->hw_frames_ctx == NULL) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
@@ -1510,9 +1536,9 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
 
 // only FFmpeg 3.4.2 and above have flags
 #if IS_FFMPEG_342_AND_ABOVE
-    int flags = FF_DRAW_PROCESS_ALPHA;
+    flags = FF_DRAW_PROCESS_ALPHA;
 #else
-    int flags = 0;
+    flags = 0;
 #endif
     if (ff_draw_init(&s->dc, AV_PIX_FMT_RGBA, flags)
         < 0) {
@@ -1624,7 +1650,7 @@ static int command(AVFilterContext *ctx, const char *cmd, const char *arg, char 
 
         ctx->priv = old;
         // NETINT/FFmpeg-patch:
-        // fix memory leak for ffmpeg while using this function 
+        // fix memory leak for ffmpeg while using this function
         av_opt_free(old);
         uninit(ctx);
         av_freep(&old);
@@ -2200,7 +2226,10 @@ static int draw_text(AVFilterContext *ctx, ni_frame_t *frame,
 
         if (s->tc_opt_string) {
             char tcbuf[AV_TIMECODE_STR_SIZE];
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+            FilterLink *li = ff_filter_link(inlink);
+            av_timecode_make_string(&s->tc, tcbuf, li->frame_count_out);
+#elif IS_FFMPEG_342_AND_ABOVE
             av_timecode_make_string(&s->tc, tcbuf, inlink->frame_count_out);
 #else
             av_timecode_make_string(&s->tc, tcbuf, inlink->frame_count);
@@ -2426,6 +2455,7 @@ static int init_hwframe_uploader(AVFilterContext *ctx, NIDrawTextContext *s,
     AVHWFramesContext *out_frames_ctx;
     AVHWFramesContext *main_frame_ctx;
     AVNIDeviceContext *pAVNIDevCtx;
+    NIFramesContext *ni_ctx,*ni_ctx_output;
     int cardno   = ni_get_cardno(frame);
     char buf[64] = {0};
 
@@ -2463,8 +2493,8 @@ static int init_hwframe_uploader(AVFilterContext *ctx, NIDrawTextContext *s,
     }
 
     // Work around a hwdownload session start timestamp issue
-    NIFramesContext *ni_ctx        = (NIFramesContext *)hwframe_ctx->internal->priv;
-    NIFramesContext *ni_ctx_output = (NIFramesContext *)out_frames_ctx->internal->priv;
+    ni_ctx        = (NIFramesContext *)hwframe_ctx->internal->priv;
+    ni_ctx_output = (NIFramesContext *)out_frames_ctx->internal->priv;
     ni_ctx_output->api_ctx.session_timestamp =
         ni_ctx->api_ctx.session_timestamp;
 
@@ -2876,7 +2906,10 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
     AVFilterContext *ctx = inlink->dst;
     AVFilterLink *outlink = ctx->outputs[0];
     NIDrawTextContext *s = ctx->priv;
-    int ret, i;
+    niFrameSurface1_t *logging_surface, *logging_surface_out;
+    uint8_t *p_dst, *p_src;
+    int y, txt_img_width, txt_img_height;
+    int ret;
 
     AVHWFramesContext *main_frame_ctx, *ovly_frame_ctx;
     niFrameSurface1_t *frame_surface, *new_frame_surface;
@@ -2885,7 +2918,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
     uint16_t main_frame_idx = 0;
     uint16_t ovly_frame_idx = 0;
     int main_scaler_format, ovly_scaler_format;
-    int cardno, flags;
+    int flags;
     int src_x, src_y, src_w, src_h;
     int dst_x, dst_y, dst_w, dst_h;
     int start_row, stop_row, start_col, stop_col;
@@ -2920,7 +2953,10 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
     }
 #endif
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    s->var_values[VAR_N] = li->frame_count_out + s->start_number;
+#elif IS_FFMPEG_342_AND_ABOVE
     s->var_values[VAR_N] = inlink->frame_count_out + s->start_number;
 #else
     s->var_values[VAR_N] = inlink->frame_count + s->start_number;
@@ -2965,9 +3001,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
            (int)s->var_values[VAR_TEXT_W], (int)s->var_values[VAR_TEXT_H],
            s->x_start, s->y_start, s->shadowx, s->shadowy);
 
-    uint8_t *p_dst, *p_src;
-    int x, y, txt_img_width, txt_img_height;
-
     txt_img_width = FFALIGN(s->x_end - s->x_start, 2);
     txt_img_height = FFALIGN(s->y_end - s->y_start, 2);
 
@@ -2986,7 +3019,10 @@ FF_ENABLE_DEPRECATION_WARNINGS
     }
 
     if (s->use_watermark) {
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *li = ff_filter_link(inlink);
+        int frame_count = li->frame_count_out;
+#elif IS_FFMPEG_342_AND_ABOVE
         int frame_count = inlink->frame_count_out;
 #else
         int frame_count = inlink->frame_count;
@@ -3029,7 +3065,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
         ret = AVERROR(ENOMEM);
         goto fail;
     }
-    
+
     if (s->use_watermark) {
         if(ni_scaler_set_watermark_params(&s->api_ctx,
                                           &s->scaler_watermark_paras.multi_watermark_params[0])) {
@@ -3148,7 +3184,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
         overlay = s->keep_overlay;
     }
     // logging
-    niFrameSurface1_t *logging_surface, *logging_surface_out;
     logging_surface = (niFrameSurface1_t*)frame->data[3];
     logging_surface_out = (niFrameSurface1_t*)overlay->data[3];
     av_log(ctx, AV_LOG_DEBUG,
@@ -3174,9 +3209,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
     }
 
     ovly_frame_idx = frame_surface->ui16FrameIdx;
-
-    cardno = ni_get_cardno(frame);
-
     ovly_frame_ctx = (AVHWFramesContext *)overlay->hw_frames_ctx->data;
     ovly_scaler_format =
         ff_ni_ffmpeg_to_gc620_pix_fmt(ovly_frame_ctx->sw_format);
@@ -3423,8 +3455,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
         out->buf[0] = av_buffer_create(out->data[3], sizeof(niFrameSurface1_t), ff_ni_frame_free, NULL, 0);
 
         av_log(ctx, AV_LOG_DEBUG,
-            "%s:IN trace ui16FrameIdx = [%d] and [%d] --> out [%d]\n",
-            __func__, main_frame_idx, ovly_frame_idx, frame_surface->ui16FrameIdx);
+            "%s:IN trace ui16FrameIdx = [%d] over [%d] --> out [%d]\n",
+            __func__, ovly_frame_idx, main_frame_idx, frame_surface->ui16FrameIdx);
 
         av_frame_free(&frame);
         return ff_filter_frame(outlink, out);
@@ -3482,7 +3514,7 @@ static int activate(AVFilterContext *ctx)
         }
         else if (ret < 0)
         {
-            av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %u available_frame %d outlink framequeue %u frame_wanted %d - return NOT READY\n",
+            av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %lu available_frame %d outlink framequeue %lu frame_wanted %d - return NOT READY\n",
                 __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
             return FFERROR_NOT_READY;
         }

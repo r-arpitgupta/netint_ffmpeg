@@ -90,12 +90,13 @@ typedef struct AVNIFramesContext {
   int            keep_alive_timeout;
   int            frame_type;
   AVRational     framerate;                  /* used for modelling hwupload */
+  int            hw_id;
 } AVNIFramesContext;
 
 static inline int ni_get_cardno(const AVFrame *frame) {
-    int cardno;
-    cardno      = (int)frame->opaque;
-    return cardno;
+    AVNIFramesContext* ni_hwf_ctx;
+    ni_hwf_ctx = (AVNIFramesContext*)((AVHWFramesContext*)frame->hw_frames_ctx->data)->hwctx;
+    return ni_hwf_ctx->hw_id;
 }
 
 #endif /* AVUTIL_HWCONTEXT_NI_H */

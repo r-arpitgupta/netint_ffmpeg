@@ -28,12 +28,16 @@
 #include "fftools/ffmpeg.h"
 #include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_ni_quad.h"
+#include "libavutil/mem.h"
 
 #define USER_DATA_UNREGISTERED_SEI_PAYLOAD_TYPE 5
 #define NETINT_SKIP_PROFILE 0
 
 int xcoder_decode_close(AVCodecContext *avctx)
 {
+#if LIBAVCODEC_VERSION_MAJOR >= 60
+  int i;
+#endif
   XCoderH264DecContext *s = avctx->priv_data;
   av_log(avctx, AV_LOG_VERBOSE, "XCoder decode close\n");
 
@@ -47,6 +51,14 @@ int xcoder_decode_close(AVCodecContext *avctx)
   s->extradata           = NULL;
   s->extradata_size      = 0;
   s->got_first_key_frame = 0;
+
+#if LIBAVCODEC_VERSION_MAJOR >= 60
+  if (s->opaque_data_array) {
+    for (i = 0; i < s->opaque_data_nb; i++)
+      av_buffer_unref(&s->opaque_data_array[i].opaque_ref);
+    av_freep(&s->opaque_data_array);
+  }
+#endif
 
   ni_rsrc_free_device_context(s->rsrc_ctx);
   s->rsrc_ctx = NULL;
@@ -264,6 +276,9 @@ static int xcoder_setup_decoder(AVCodecContext *avctx)
 
 int xcoder_decode_init(AVCodecContext *avctx)
 {
+#if LIBAVCODEC_VERSION_MAJOR >= 60
+  int i;
+#endif
   int ret = 0;
   XCoderH264DecContext *s = avctx->priv_data;
   const AVPixFmtDescriptor *desc;
@@ -422,6 +437,25 @@ int xcoder_decode_init(AVCodecContext *avctx)
   }
 
   s->current_pts = NI_NOPTS_VALUE;
+
+#if LIBAVCODEC_VERSION_MAJOR >= 60
+  /* The size opaque pointers buffer is chosen by max buffered packets in FW (4) +
+   * max output buffer in FW (24) + some extra room to be safe. If the delay of any
+   * frame is larger than this, we assume that the frame is dropped so the buffered
+   * opaque pointer can be overwritten when the opaque_data_array wraps around */
+  s->opaque_data_nb = 30;
+  s->opaque_data_pos = 0;
+  if (!s->opaque_data_array) {
+    s->opaque_data_array = av_calloc(s->opaque_data_nb, sizeof(OpaqueData));
+    if (!s->opaque_data_array) {
+      ret = AVERROR(ENOMEM);
+      goto done;
+    }
+  }
+  for (i = 0; i < s->opaque_data_nb; i++) {
+    s->opaque_data_array[i].pkt_pos = -1;
+  }
+#endif
 
 done:
   //if ( (NI_INVALID_DEVICE_HANDLE == s->api_ctx.blk_io_handle) || (NI_INVALID_DEVICE_HANDLE == s->api_ctx.device_handle) )

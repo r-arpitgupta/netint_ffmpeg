@@ -1279,17 +1279,11 @@ static int ni_hwup_frame(AVHWFramesContext *hwfc, AVFrame *dst, const AVFrame *s
 
     // Update frames context
     ctx->split_ctx.f[0] = (int)dst_surf->encoding_type;
-
-    /* When gst upload, save the hw_id/card number to use for next filter open.
-       gst decode use the opaque to save it's data, so gst need the param dev_dec_idx
-       to save hw_id/card number. */
-    /* Remove the const qualifier */
-    AVFrame *src_frame;
-    src_frame         = (AVFrame *)src;
     
-      /* Set the hw_id/card number in the opaque field */
-    // NOLINTNEXTLINE(clang-diagnostic-int-to-void-pointer-cast)
-    src_frame->opaque = (void *)ctx->api_ctx.hw_id;
+    /* Set the hw_id/card number in AVNIFramesContext */
+    AVNIFramesContext* ni_hwf_ctx;
+    ni_hwf_ctx = (AVNIFramesContext*)((AVHWFramesContext*)dst->hw_frames_ctx->data)->hwctx;
+    ni_hwf_ctx->hw_id = ctx->api_ctx.hw_id;
 
       size_t crop_right = 0, crop_bottom = 0;
       // only FFmpeg 3.4.2 and above have crop_*

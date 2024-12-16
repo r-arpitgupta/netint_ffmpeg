@@ -27,8 +27,14 @@
  * overlay one video on top of another
  */
 
+#include "nifilter.h"
 #include "filters.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
+#include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #include "libavutil/common.h"
 #include "libavutil/eval.h"
 #include "libavutil/avstring.h"
@@ -36,11 +42,9 @@
 #include "libavutil/opt.h"
 #include "libavutil/timestamp.h"
 #include "libavutil/hwcontext.h"
-#include "internal.h"
 #include "drawutils.h"
 #include "framesync.h"
 #include "video.h"
-#include "nifilter.h"
 #include <ni_device_api.h>
 
 static const char *const var_names[] = {
@@ -300,7 +304,14 @@ static int config_input_overlay(AVFilterLink *inlink, AVFrame *in)
     const AVPixFmtDescriptor *pix_desc;
     int ret;
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if (li == NULL) {
+        av_log(inlink->dst, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     if (inlink->hw_frames_ctx == NULL) {
         av_log(inlink->dst, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
@@ -1311,15 +1322,24 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
 
     outlink->w = ctx->inputs[MAIN]->w;
     outlink->h = ctx->inputs[MAIN]->h;
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[MAIN]);
+    FilterLink *lo = ff_filter_link(outlink);
+    lo->frame_rate = li->frame_rate;
+#else
     outlink->frame_rate = ctx->inputs[MAIN]->frame_rate;
+#endif
     outlink->time_base = ctx->inputs[MAIN]->time_base;
 
 #if IS_FFMPEG_342_AND_ABOVE
     ret = init_framesync(ctx);
     if (ret < 0)
         return ret;
-
+#if IS_FFMPEG_71_AND_ABOVE
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#else
     in_frames_ctx = (AVHWFramesContext *)ctx->inputs[MAIN]->hw_frames_ctx->data;
+#endif
 #else
     in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
 #endif
@@ -1336,8 +1356,17 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
         
         av_hwframe_ctx_init(s->out_frames_ref);
 
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *lt = ff_filter_link(ctx->inputs[OVERLAY]);
+        AVHWFramesContext *tmp_frames_ctx = (AVHWFramesContext *)lt->hw_frames_ctx->data;
+#else
+        AVHWFramesContext *tmp_frames_ctx = (AVHWFramesContext *)ctx->inputs[OVERLAY]->hw_frames_ctx->data;
+#endif
         // HW does not support NV12 Compress + RGB -> NV12 Compress
-        if(((in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_8_TILE_4X4) || (in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_10_TILE_4X4)) && ((((AVHWFramesContext *)ctx->inputs[OVERLAY]->hw_frames_ctx->data)->sw_format >= AV_PIX_FMT_ARGB) && (((AVHWFramesContext *)ctx->inputs[OVERLAY]->hw_frames_ctx->data)->sw_format <= AV_PIX_FMT_BGRA)))
+        if(((in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_8_TILE_4X4) ||
+            (in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_10_TILE_4X4)) &&
+            ((tmp_frames_ctx->sw_format >= AV_PIX_FMT_ARGB) &&
+            (tmp_frames_ctx->sw_format <= AV_PIX_FMT_BGRA)))
         {
             out_frames_ctx->sw_format = AV_PIX_FMT_NV12;
             av_log(ctx, AV_LOG_WARNING, "Overlay output is changed to nv12\n");
@@ -1348,14 +1377,26 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
         out_frames_ctx->initial_pool_size =
             NI_OVERLAY_ID; // Repurposed as identity code
     } else {
+#if IS_FFMPEG_71_AND_ABOVE
+        s->out_frames_ref = av_buffer_ref(li->hw_frames_ctx);
+#else
         s->out_frames_ref = av_buffer_ref(ctx->inputs[MAIN]->hw_frames_ctx);
+#endif
     }
 
+#if IS_FFMPEG_71_AND_ABOVE
+    av_buffer_unref(&lo->hw_frames_ctx);
+
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     av_buffer_unref(&outlink->hw_frames_ctx);
 
     outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
     if (!outlink->hw_frames_ctx)
         return AVERROR(ENOMEM);
+#endif
 
     return ret;
 }
@@ -1373,7 +1414,14 @@ static int config_input_main(AVFilterLink *inlink, AVFrame *in)
     AVHWFramesContext *in_frames_ctx;
     const AVPixFmtDescriptor *pix_desc;
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(inlink->dst, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     if (inlink->hw_frames_ctx == NULL) {
         av_log(inlink->dst, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);

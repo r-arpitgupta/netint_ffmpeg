@@ -29,8 +29,14 @@
 #include "internal.h"
 #include "libavcodec/h264.h"
 #include "libavcodec/h264_sei.h"
+#if ((LIBAVCODEC_VERSION_MAJOR > 61) || (LIBAVCODEC_VERSION_MAJOR == 61 && LIBAVCODEC_VERSION_MINOR >= 19))
+#include "libavcodec/hevc/hevc.h"
+#include "libavcodec/hevc/sei.h"
+#else
 #include "libavcodec/hevc.h"
 #include "libavcodec/hevc_sei.h"
+#endif
+
 #include "libavutil/eval.h"
 #include "libavutil/hdr_dynamic_metadata.h"
 #include "libavutil/hwcontext.h"
@@ -472,6 +478,9 @@ int ff_xcoder_dec_send(AVCodecContext *avctx, XCoderH264DecContext *s, AVPacket 
   int new_packet = 0;
   int extra_prev_size = 0;
   int svct_skip_packet = s->svct_skip_next_packet;
+#if LIBAVCODEC_VERSION_MAJOR >= 60
+  OpaqueData *opaque_data;
+#endif
 
   size = pkt->size;
 
@@ -743,6 +752,17 @@ int ff_xcoder_dec_send(AVCodecContext *avctx, XCoderH264DecContext *s, AVPacket 
     /* if this packet is done sending, free any sei buffer. */
     free(xpkt->p_custom_sei_set);
     xpkt->p_custom_sei_set = NULL;
+
+#if LIBAVCODEC_VERSION_MAJOR >= 60
+    /* save the opaque pointers from input packet to be copied to corresponding frame later */
+    if (avctx->flags & AV_CODEC_FLAG_COPY_OPAQUE) {
+      opaque_data = &s->opaque_data_array[s->opaque_data_pos];
+      opaque_data->pkt_pos = pkt->pos;
+      opaque_data->opaque = pkt->opaque;
+      av_buffer_replace(&opaque_data->opaque_ref, pkt->opaque_ref);
+      s->opaque_data_pos = (s->opaque_data_pos + 1) % s->opaque_data_nb;
+    }
+#endif
   }
 
   if (sent != 0)
@@ -804,6 +824,10 @@ int retrieve_frame(AVCodecContext *avctx, AVFrame *data, int *got_frame,
   niFrameSurface1_t* p_data3;
   niFrameSurface1_t* p_data3_1;
   niFrameSurface1_t* p_data3_2;
+#if LIBAVCODEC_VERSION_MAJOR >= 60
+  OpaqueData *opaque_data;
+  int i;
+#endif
 
   av_log(avctx, AV_LOG_TRACE,
          "retrieve_frame: buf %p data_len [%d %d %d %d] buf_size %u\n", buf,
@@ -1264,6 +1288,28 @@ FF_ENABLE_DEPRECATION_WARNINGS
       dst_ctx->split_ctx.f8b[2] =
           (num_extra_outputs == 2) ? p_data3_2->bit_depth : 0;
   }
+
+#if LIBAVCODEC_VERSION_MAJOR >= 60
+  /* retrive the opaque pointers saved earlier by matching the pkt_pos between output
+   * frame and input packet, assuming that the pkt_pos of every input packet is unique */
+  if (avctx->flags & AV_CODEC_FLAG_COPY_OPAQUE) {
+    opaque_data = NULL;
+    for (i = 0; i < s->opaque_data_nb; i++) {
+      if (s->opaque_data_array[i].pkt_pos == (int64_t)xfme->pkt_pos) {
+        opaque_data = &s->opaque_data_array[i];
+        break;
+      }
+    }
+    /* copy the pointers over to AVFrame if a matching entry found, otherwise it's unexpected so don't do anything */
+    if (opaque_data) {
+      frame->opaque = opaque_data->opaque;
+      av_buffer_replace(&frame->opaque_ref, opaque_data->opaque_ref);
+      av_buffer_unref(&opaque_data->opaque_ref);
+      opaque_data->pkt_pos = -1;
+    }
+  }
+#endif
+
   *got_frame = 1;
   return buf_size;
 }
@@ -1499,12 +1545,10 @@ read_op:
       }
       frame->hw_frames_ctx = av_buffer_ref(avctx->hw_frames_ctx);
 
-      /* Set the hw_id/card number in the opaque field */
-      // NOLINTNEXTLINE(clang-diagnostic-int-to-void-pointer-cast)
-#if (LIBAVCODEC_VERSION_MAJOR >= 60)
-      avctx->flags &= ~(AV_CODEC_FLAG_COPY_OPAQUE);
-#endif
-      frame->opaque = (void *)(uintptr_t)s->dev_dec_idx;
+      /* Set the hw_id/card number in AVNIFramesContext */
+      AVNIFramesContext* ni_hwf_ctx;
+      ni_hwf_ctx = (AVNIFramesContext*)((AVHWFramesContext*)frame->hw_frames_ctx->data)->hwctx;
+      ni_hwf_ctx->hw_id = s->dev_dec_idx;
     }
     if (s->api_ctx.frame_num == 1)
     {

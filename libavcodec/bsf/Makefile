@@ -22,6 +22,7 @@ OBJS-$(CONFIG_H264_REDUNDANT_PPS_BSF)     += bsf/h264_redundant_pps.o
 OBJS-$(CONFIG_HAPQA_EXTRACT_BSF)          += bsf/hapqa_extract.o
 OBJS-$(CONFIG_HEVC_FRAME_SPLIT_BSF)       += ni_hevc_frame_split_bsf.o ni_hevc_rbsp.o
 OBJS-$(CONFIG_HEVC_METADATA_BSF)          += bsf/h265_metadata.o
+OBJS-$(CONFIG_DOVI_RPU_BSF)               += bsf/dovi_rpu.o
 OBJS-$(CONFIG_HEVC_MP4TOANNEXB_BSF)       += bsf/hevc_mp4toannexb.o
 OBJS-$(CONFIG_HEVC_RAWTOTILE_BSF)         += ni_hevc_rawtotile_bsf.o ni_hevc_rbsp.o
 OBJS-$(CONFIG_HEVC_TILE_REPACK_BSF)       += ni_hevc_tile_repack_bsf.o

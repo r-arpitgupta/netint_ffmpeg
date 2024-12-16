@@ -27,13 +27,17 @@
  * merge one video y and the other uv to a new video
  */
 
+#include "nifilter.h"
 #include "filters.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
+#include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #include "libavutil/common.h"
 #include "libavutil/opt.h"
 #include "libavutil/hwcontext.h"
-#include "internal.h"
-#include "nifilter.h"
 #include <ni_device_api.h>
 
 typedef struct NetIntMergeContext {
@@ -402,7 +406,14 @@ static int config_input_0(AVFilterLink *inlink, AVFrame *in)
     NIFramesContext *src_ctx;
     ni_split_context_t *p_split_ctx_src;
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(inlink->dst, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     if (inlink->hw_frames_ctx == NULL) {
         av_log(inlink->dst, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
@@ -462,15 +473,21 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
     outlink->h = s->src_ctx.h[1];
     outlink->sample_aspect_ratio = outlink->src->inputs[0]->sample_aspect_ratio;
 
-#if IS_FFMPEG_342_AND_ABOVE
-
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
 #else
     in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
 #endif
     if(s->src_ctx.h[0] == s->src_ctx.h[1] && s->src_ctx.w[0] == s->src_ctx.w[1])
     {
+#if IS_FFMPEG_71_AND_ABOVE
+        s->out_frames_ref = av_buffer_ref(li->hw_frames_ctx);
+#else
         s->out_frames_ref = av_buffer_ref(ctx->inputs[0]->hw_frames_ctx);
+#endif
     }
     else
     {
@@ -490,10 +507,18 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
 
     }
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(outlink);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     av_buffer_unref(&outlink->hw_frames_ctx);
     outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
     if (!outlink->hw_frames_ctx)
         return AVERROR(ENOMEM);
+#endif
 
     return ret;
 }

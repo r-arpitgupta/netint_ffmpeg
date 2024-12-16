@@ -25,12 +25,16 @@
 #include "libavutil/parseutils.h"
 #include "libavutil/pixdesc.h"
 
+#include "version.h"
 #include "filters.h"
 #include "formats.h"
+#if !(LIBAVFILTER_VERSION_MAJOR > 10 || (LIBAVFILTER_VERSION_MAJOR == 10 && LIBAVFILTER_VERSION_MINOR >= 4))
 #include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #include "framesync.h"
 #include "video.h"
-
 #include "nifilter.h"
 
 #define MAX_INPUTS 8
@@ -148,10 +152,18 @@ static int init_out_pool(AVFilterContext *ctx)
     StackContext *s = ctx->priv;
     AVHWFramesContext *out_frames_ctx;
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+#else
     if (ctx->inputs[0]->hw_frames_ctx == NULL) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
     }
+#endif
 
     out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
 
@@ -205,8 +217,12 @@ static int process_frame(FFFrameSync *fs)
                 return AVERROR(EINVAL);
             }
         }
-
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *li = ff_filter_link(inlink0);
+        pAVHFWCtx = (AVHWFramesContext *) li->hw_frames_ctx->data;
+#else
         pAVHFWCtx = (AVHWFramesContext *) inlink0->hw_frames_ctx->data;
+#endif
         pAVNIDevCtx = (AVNIDeviceContext *) pAVHFWCtx->device_ctx->hwctx;
 
         retcode = ni_device_session_context_init(&s->api_ctx);
@@ -363,8 +379,12 @@ static int process_frame(FFFrameSync *fs)
 
         for ( ; i < end; i++) {
             AVFilterLink *inlink = ctx->inputs[i];
+#if IS_FFMPEG_71_AND_ABOVE
+            FilterLink *li = ff_filter_link(inlink);
+            pAVHFWCtx = (AVHWFramesContext *) li->hw_frames_ctx->data;
+#else
             pAVHFWCtx = (AVHWFramesContext *) inlink->hw_frames_ctx->data;
-
+#endif
             scaler_format = ff_ni_ffmpeg_to_gc620_pix_fmt(pAVHFWCtx->sw_format);
 
             frame_surface = (niFrameSurface1_t *) in[i]->data[3];
@@ -452,11 +472,18 @@ static int config_output(AVFilterLink *outlink)
     char *arg3, *p3, *saveptr3 = NULL;
     int inw, inh, size;
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+#else
     if (ctx->inputs[0]->hw_frames_ctx == NULL) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
     }
-
+#endif
     s->desc = av_pix_fmt_desc_get(outlink->format);
     if (!s->desc)
         return AVERROR_BUG;
@@ -580,11 +607,16 @@ static int config_output(AVFilterLink *outlink)
 
     outlink->w          = width;
     outlink->h          = height;
+    outlink->sample_aspect_ratio = ctx->inputs[s->sync]->sample_aspect_ratio;
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(outlink);
+    FilterLink *lt = ff_filter_link(ctx->inputs[s->sync]);
+    lo->frame_rate = lt->frame_rate;
+    in_frames_ctx0 = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#else
     outlink->frame_rate = ctx->inputs[s->sync]->frame_rate;
-    outlink->sample_aspect_ratio = ctx->inputs[s->sync]->sample_aspect_ratio;;
-
     in_frames_ctx0 = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
-
+#endif
     if (in_frames_ctx0->sw_format == AV_PIX_FMT_BGRP) {
         av_log(ctx, AV_LOG_ERROR, "bgrp not supported\n");
         return AVERROR(EINVAL);
@@ -596,11 +628,20 @@ static int config_output(AVFilterLink *outlink)
     }
 
     for (i = 1; i < s->nb_inputs; i++) {
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *lii = ff_filter_link(ctx->inputs[i]);
+        if (lii->hw_frames_ctx == NULL) {
+            av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+            return AVERROR(EINVAL);
+        }
+        in_frames_ctx = (AVHWFramesContext *)lii->hw_frames_ctx->data;
+#else
         if (ctx->inputs[i]->hw_frames_ctx == NULL) {
             av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
             return AVERROR(EINVAL);
         }
         in_frames_ctx = (AVHWFramesContext *)ctx->inputs[i]->hw_frames_ctx->data;
+#endif
         if (in_frames_ctx0->sw_format != in_frames_ctx->sw_format) {
             av_log(ctx, AV_LOG_ERROR,
                    "All inputs must have the same pixel format!!!\n");
@@ -620,6 +661,17 @@ static int config_output(AVFilterLink *outlink)
 
     for (i = 1; i < s->nb_inputs; i++) {
         AVFilterLink *inlink = ctx->inputs[i];
+#if IS_FFMPEG_71_AND_ABOVE
+        li = ff_filter_link(inlink);
+        lo = ff_filter_link(outlink);
+        if (lo->frame_rate.num != li->frame_rate.num ||
+            lo->frame_rate.den != li->frame_rate.den) {
+            av_log(ctx, AV_LOG_WARNING,
+                    "Video inputs have different frame rates, output will be VFR\n");
+            lo->frame_rate = av_make_q(1, 0);
+            break;
+        }
+#else
         if (outlink->frame_rate.num != inlink->frame_rate.num ||
             outlink->frame_rate.den != inlink->frame_rate.den) {
             av_log(ctx, AV_LOG_WARNING,
@@ -627,6 +679,7 @@ static int config_output(AVFilterLink *outlink)
             outlink->frame_rate = av_make_q(1, 0);
             break;
         }
+#endif
     }
 
     if ((ret = ff_framesync_init(&s->fs, ctx, s->nb_inputs)) < 0)
@@ -669,12 +722,20 @@ static int config_output(AVFilterLink *outlink)
 
     av_hwframe_ctx_init(s->out_frames_ref);
 
+#if IS_FFMPEG_71_AND_ABOVE
+    lo = ff_filter_link(ctx->outputs[0]);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
     ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
 
     if (!ctx->outputs[0]->hw_frames_ctx)
         return AVERROR(ENOMEM);
-
+#endif
     return ret;
 }
 

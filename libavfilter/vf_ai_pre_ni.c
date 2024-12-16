@@ -24,9 +24,14 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "nifilter.h"
 #include "filters.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #if HAVE_IO_H
 #include <io.h>
 #endif
@@ -42,8 +47,8 @@
 #include "libswscale/swscale.h"
 #include "ni_device_api.h"
 #include "ni_util.h"
-#include "nifilter.h"
 #include "video.h"
+
 
 #define NI_NUM_FRAMES_IN_QUEUE 8
 
@@ -438,11 +443,18 @@ static int ni_ai_pre_output_config_props(AVFilterLink *outlink) {
     NetIntAiPreprocessContext *s = ctx->priv;
     int out_width, out_height;
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *l = ff_filter_link(inlink);
+    if ((l->hw_frames_ctx == NULL) && (inlink->format == AV_PIX_FMT_NI_QUAD)) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+#else
     if ((inlink->hw_frames_ctx == NULL) && (inlink->format == AV_PIX_FMT_NI_QUAD)) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
     }
-
+#endif
     if(s->out_width == -1 || s->out_height == -1){
         out_width = inlink->w;
         out_height = inlink->h;
@@ -456,13 +468,19 @@ static int ni_ai_pre_output_config_props(AVFilterLink *outlink) {
     outlink->w = out_width;
     outlink->h = out_height;
 
+#if IS_FFMPEG_71_AND_ABOVE
+    if (l->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_DEBUG, "sw frame\n");
+        return 0;
+    }
+    in_frames_ctx = l->hw_frames_ctx->data;
+#else
     if (inlink->hw_frames_ctx == NULL) {
         av_log(ctx, AV_LOG_DEBUG, "sw frame\n");
         return 0;
     }
-
     in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
-
+#endif
     if (in_frames_ctx->format != AV_PIX_FMT_NI_QUAD) {
         av_log(ctx, AV_LOG_ERROR, "sw frame not supported, format=%d\n", in_frames_ctx->format);
         return AVERROR(EINVAL);
@@ -486,12 +504,19 @@ static int ni_ai_pre_output_config_props(AVFilterLink *outlink) {
     out_frames_ctx->sw_format         = in_frames_ctx->sw_format;
     out_frames_ctx->initial_pool_size = NI_AI_PREPROCESS_ID;
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(outlink);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
     ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
 
     if (!ctx->outputs[0]->hw_frames_ctx)
         return AVERROR(ENOMEM);
-
+#endif
     return 0;
 }
 

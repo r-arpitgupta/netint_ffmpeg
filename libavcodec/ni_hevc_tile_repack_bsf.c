@@ -45,7 +45,12 @@
 #include "internal.h"
 #endif
 
+#if ((LIBAVCODEC_VERSION_MAJOR > 61) || (LIBAVCODEC_VERSION_MAJOR == 61 && LIBAVCODEC_VERSION_MINOR >= 19))
+#include "hevc/hevc.h"
+#include "libavutil/mem.h"
+#else
 #include "hevc.h"
+#endif
 
 typedef struct HEVCRepackContext {
     AVPacket *buffer_pkt;

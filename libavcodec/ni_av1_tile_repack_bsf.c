@@ -38,8 +38,9 @@
 #include "cbs_av1.h"
 #include "internal.h"
 #include "ni_av1_rbsp.h"
-
-
+#if ((LIBAVCODEC_VERSION_MAJOR > 61) || (LIBAVCODEC_VERSION_MAJOR == 61 && LIBAVCODEC_VERSION_MINOR >= 19))
+#include "libavutil/mem.h"
+#endif
 typedef struct AV1RepackContext {
     AVPacket *buffer_pkt;
     AVPacket **tile_pkt;
@@ -71,7 +72,7 @@ static int av1_rawtotile_encode_sequence_header_obu(AVBSFContext *ctx, AV1RawSeq
     av_log(ctx, AV_LOG_DEBUG, "### %s line %d %s: width %d height %d\n",
             __FILE__, __LINE__, __func__, tileinfo->width, tileinfo->height);
 
-    return av1_write_sequence_header_obu(s->cbc, &s->stream, current);
+    return netint_av1_write_sequence_header_obu(s->cbc, &s->stream, current);
 }
 
 static int av1_rawtotile_encode_temporal_delimiter_obu(AVBSFContext *ctx)
@@ -80,7 +81,7 @@ static int av1_rawtotile_encode_temporal_delimiter_obu(AVBSFContext *ctx)
 
     av_log(ctx, AV_LOG_DEBUG, "### %s line %d %s: \n", __FILE__, __LINE__, __func__);
 
-    return av1_write_temporal_delimiter_obu(s->cbc, &s->stream);
+    return netint_av1_write_temporal_delimiter_obu(s->cbc, &s->stream);
 }
 
 #ifdef NOFRAMEOBU
@@ -114,7 +115,7 @@ static int av1_rawtotile_encode_frame_header_obu(AVBSFContext *ctx, AV1RawSequen
     av_log(ctx, AV_LOG_DEBUG, "### %s line %d %s: width %d height %d tile_size_bytes_minus1 %d\n",
             __FILE__, __LINE__, __func__, tileinfo->width, tileinfo->height, current->tile_size_bytes_minus1);
 
-    return av1_write_frame_header_obu(s->cbc, &s->stream, seq, current);
+    return netint_av1_write_frame_header_obu(s->cbc, &s->stream, seq, current);
 }
 
 static int av1_rawtotile_encode_tile_group_obu(AVBSFContext *ctx, AV1RawSequenceHeader *seq, AV1RawTileGroup *current)
@@ -126,7 +127,7 @@ static int av1_rawtotile_encode_tile_group_obu(AVBSFContext *ctx, AV1RawSequence
     av_log(ctx, AV_LOG_DEBUG, "### %s line %d %s: tile_start_and_end_present_flag %d tg_start %d tg_end %d\n",
             __FILE__, __LINE__, __func__, current->tile_start_and_end_present_flag, current->tg_start, current->tg_end);
 
-    return av1_write_tile_group_obu(s->cbc, &s->stream, seq, current);
+    return netint_av1_write_tile_group_obu(s->cbc, &s->stream, seq, current);
 }
 #else
 static int av1_rawtotile_encode_frame_obu(
@@ -150,7 +151,7 @@ static int av1_rawtotile_encode_frame_obu(
     av_log(ctx, AV_LOG_DEBUG, "### %s line %d %s: tile_start_and_end_present_flag %d tg_start %d tg_end %d\n",
             __FILE__, __LINE__, __func__, tile_current->tile_start_and_end_present_flag, tile_current->tg_start, tile_current->tg_end);
 
-    return av1_write_frame_obu(s->cbc, &s->stream, seq, &current);
+    return netint_av1_write_frame_obu(s->cbc, &s->stream, seq, &current);
 }
 #endif
 
@@ -305,7 +306,7 @@ static int av1_tile_repack_filter(AVBSFContext *ctx, AVPacket *out) {
             obu = (AV1RawOBU *) unit->content;
             obu->header.obu_has_size_field = 1;
 
-            av1_write_obu_header(s->cbc, &s->stream, &obu->header);
+            netint_av1_write_obu_header(s->cbc, &s->stream, &obu->header);
 
             av_log(ctx, AV_LOG_DEBUG, "### %s line %d %s: obu_has_size_field %d\n",
                    __FILE__, __LINE__, __func__, obu->header.obu_has_size_field);
@@ -377,9 +378,9 @@ static int av1_tile_repack_filter(AVBSFContext *ctx, AVPacket *out) {
 
 
             if(unit->type != AV1_OBU_TILE_GROUP) {
-               av_log(ctx, AV_LOG_DEBUG, "### %s line %d %s: calling av1_update_obu_data_length 1 \n",
+               av_log(ctx, AV_LOG_DEBUG, "### %s line %d %s: calling netint_av1_update_obu_data_length 1 \n",
                        __FILE__, __LINE__, __func__);
-               obu_size = av1_update_obu_data_length(s->cbc, &s->stream, start_pos, obu, &pbc_tmp, add_trailing_bits);
+               obu_size = netint_av1_update_obu_data_length(s->cbc, &s->stream, start_pos, obu, &pbc_tmp, add_trailing_bits);
             } else {
                 uint8_t *rawdata;
                 int tile_size, last_tile;
@@ -391,7 +392,7 @@ static int av1_tile_repack_filter(AVBSFContext *ctx, AVPacket *out) {
 
                     // Don't add the size info for the last tile
                     if(!last_tile)
-                        av1_write_le32(s->cbc, &s->stream, "tile_size_minus_1", tile_size - 1);
+                        netint_av1_write_le32(s->cbc, &s->stream, "tile_size_minus_1", tile_size - 1);
 
                     data_pos = put_bits_count(&s->stream) / 8;
                     flush_put_bits(&s->stream);
@@ -415,7 +416,7 @@ static int av1_tile_repack_filter(AVBSFContext *ctx, AVPacket *out) {
 #endif
                 }
                 tile_group_index++;
-                obu_size = av1_update_obu_data_length(s->cbc, &s->stream, start_pos, obu, &pbc_tmp, add_trailing_bits);
+                obu_size = netint_av1_update_obu_data_length(s->cbc, &s->stream, start_pos, obu, &pbc_tmp, add_trailing_bits);
             }
         }
         for(i = 0; i < s->tile_num; i++)
@@ -440,8 +441,8 @@ static int av1_tile_repack_filter(AVBSFContext *ctx, AVPacket *out) {
 
         av_packet_copy_props(out, s->buffer_pkt);
 
-        av1_bitstream_fetch(&s->stream, out, new_size);
-        av1_bitstream_reset(&s->stream);
+        netint_av1_bitstream_fetch(&s->stream, out, new_size);
+        netint_av1_bitstream_reset(&s->stream);
 
         s->tile_pos = 0;
         goto end;

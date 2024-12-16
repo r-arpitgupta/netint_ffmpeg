@@ -31,9 +31,13 @@
 #include "libavutil/parseutils.h"
 #include "libavutil/opt.h"
 
-#include "formats.h"
-#include "internal.h"
 #include "nifilter.h"
+#include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
+#include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #include "filters.h"
 
 #define BUFFER_WIDTH_PIXEL_ALIGNMENT 16
@@ -320,7 +324,14 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
         return AVERROR(EINVAL);
     }
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *) li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     if (ctx->inputs[0]->hw_frames_ctx == NULL) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
@@ -358,6 +369,21 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
         //skip hardware rotate
         rot->skip_filter = 1;
 
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *lt = ff_filter_link(outlink->src->inputs[0]);
+        rot->out_frames_ref = av_buffer_ref(lt->hw_frames_ctx);
+        if(!rot->out_frames_ref)
+        {
+            return AVERROR(ENOMEM);
+        }
+        FilterLink *lo = ff_filter_link(outlink);
+        av_buffer_unref(&lo->hw_frames_ctx);
+        lo->hw_frames_ctx = av_buffer_ref(rot->out_frames_ref);
+        if(!lo->hw_frames_ctx)
+        {
+            return AVERROR(ENOMEM);
+        }
+#else
         AVFilterLink *inlink_for_skip = outlink->src->inputs[0];
 
         rot->out_frames_ref = av_buffer_ref(inlink_for_skip->hw_frames_ctx);
@@ -372,7 +398,7 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
         {
             return AVERROR(ENOMEM);
         }
-
+#endif
         return 0;
     }
 
@@ -393,6 +419,16 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
 
     av_hwframe_ctx_init(rot->out_frames_ref);
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(ctx->outputs[0]);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(rot->out_frames_ref);
+
+    if (!lo->hw_frames_ctx)
+    {
+        return AVERROR(ENOMEM);
+    }
+#else
     av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
     ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(rot->out_frames_ref);
 
@@ -400,6 +436,7 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
     {
         return AVERROR(ENOMEM);
     }
+#endif
 
     return 0;
 }

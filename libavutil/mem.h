@@ -107,7 +107,7 @@
  * @{
  */
 
- /**
+/**
  * Allocate a memory block with alignment suitable 4k aligned access
  *
  * @param size Size in bytes for the memory block to be allocated

@@ -29,7 +29,10 @@
 #include "libavutil/pixdesc.h"
 #include "libavutil/timestamp.h"
 #include "avfilter.h"
+#include "version.h"
+#if !(LIBAVFILTER_VERSION_MAJOR > 10 || (LIBAVFILTER_VERSION_MAJOR == 10 && LIBAVFILTER_VERSION_MINOR >= 4))
 #include "internal.h"
+#endif
 #include "drawutils.h"
 #include "formats.h"
 #include "framesync.h"

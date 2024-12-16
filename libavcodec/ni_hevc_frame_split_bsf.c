@@ -41,6 +41,9 @@
 #include "cbs_h265.h"
 #include "ni_hevc_extradata.h"
 #include "ni_hevc_rbsp.h"
+#if ((LIBAVCODEC_VERSION_MAJOR > 61) || (LIBAVCODEC_VERSION_MAJOR == 61 && LIBAVCODEC_VERSION_MINOR >= 19))
+#include "libavutil/mem.h"
+#endif
 
 struct tile_format {
     int log2_ctb_size;

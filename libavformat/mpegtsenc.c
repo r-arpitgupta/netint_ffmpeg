@@ -25,13 +25,14 @@
 #include "libavutil/dict.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #include "libavcodec/ac3_parser_internal.h"
 #include "libavcodec/bytestream.h"
 #include "libavcodec/defs.h"
 #include "libavcodec/h264.h"
-#include "libavcodec/hevc.h"
+#include "libavcodec/hevc/hevc.h"
 #include "libavcodec/vvc.h"
 #include "libavcodec/startcode.h"
 
@@ -1040,6 +1041,7 @@ static void mpegts_write_scte35(AVFormatContext *s, int64_t pts, const uint8_t *
     q+=payload_size;
     mpegts_write_section_scte35(&ts->scte35, data, q - data);
 }
+
 
 /* This stores a string in buf with the correct encoding and also sets the
  * first byte as the length. !str is accepted for an empty string.

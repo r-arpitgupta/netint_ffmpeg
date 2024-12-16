@@ -20,11 +20,15 @@
 #include "libavutil/opt.h"
 #include "libavutil/time.h"
 #include "libswscale/swscale.h"
+#include "version.h"
 #include "avfilter.h"
 #include "formats.h"
+#if !(LIBAVFILTER_VERSION_MAJOR > 10 || (LIBAVFILTER_VERSION_MAJOR == 10 && LIBAVFILTER_VERSION_MINOR >= 4))
 #include "internal.h"
+#else
+#include "filters.h"
+#endif
 #include <SDL.h>
-
 
 typedef struct SdlContext {
     const AVClass *class;

@@ -24,9 +24,14 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "version.h"
 #include "filters.h"
 #include "formats.h"
+#if !(LIBAVFILTER_VERSION_MAJOR > 10 || (LIBAVFILTER_VERSION_MAJOR == 10 && LIBAVFILTER_VERSION_MINOR >= 4))
 #include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #if HAVE_IO_H
 #include <io.h>
 #endif
@@ -842,6 +847,10 @@ static int ni_roi_config_input(AVFilterContext *ctx, AVFrame *frame)
                    "could not initialize hwframe scale context\n");
             goto fail_out;
         }
+        
+        ff_ni_clone_hwframe_ctx((AVHWFramesContext *)frame->hw_frames_ctx->data, 
+                                (AVHWFramesContext *)s->out_frames_ref->data,
+                                &s->ai_ctx->api_ctx);
     }
 
     s->initialized = 1;
@@ -907,6 +916,19 @@ static int ni_roi_output_config_props(AVFilterLink *outlink)
     AVHWFramesContext *out_frames_ctx;
     NetIntRoiContext *s = ctx->priv;
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if ((li->hw_frames_ctx == NULL) && (inlink->format == AV_PIX_FMT_NI_QUAD)) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_DEBUG, "sw frame\n");
+        return 0;
+    }
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#else
     if ((inlink->hw_frames_ctx == NULL) && (inlink->format == AV_PIX_FMT_NI_QUAD)) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
@@ -916,11 +938,10 @@ static int ni_roi_output_config_props(AVFilterLink *outlink)
         av_log(ctx, AV_LOG_DEBUG, "sw frame\n");
         return 0;
     }
-
+    in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
+#endif
     outlink->w = inlink->w;
     outlink->h = inlink->h;
-
-    in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
 
     if (in_frames_ctx->sw_format == AV_PIX_FMT_BGRP) {
         av_log(ctx, AV_LOG_ERROR, "bgrp not supported\n");
@@ -949,11 +970,20 @@ static int ni_roi_output_config_props(AVFilterLink *outlink)
 
     av_hwframe_ctx_init(s->out_frames_ref);
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(ctx->outputs[0]);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
     ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
 
     if (!ctx->outputs[0]->hw_frames_ctx)
         return AVERROR(ENOMEM);
+#endif
 
     return 0;
 }

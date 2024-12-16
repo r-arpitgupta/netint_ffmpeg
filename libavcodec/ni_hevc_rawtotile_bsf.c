@@ -39,7 +39,11 @@
 #else
 #include "bsf.h"
 #endif
+#if ((LIBAVCODEC_VERSION_MAJOR > 61) || (LIBAVCODEC_VERSION_MAJOR == 61 && LIBAVCODEC_VERSION_MINOR >= 19))
+#include "hevc/hevc.h"
+#else
 #include "hevc.h"
+#endif
 #include "cbs.h"
 #include "cbs_h265.h"
 #include "ni_hevc_rbsp.h"

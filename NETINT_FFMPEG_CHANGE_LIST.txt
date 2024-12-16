@@ -49,7 +49,8 @@ Include SUBTITLE to existing TS timestamp detection and modification for VIDEO a
 --------------------------------------------------
 fftools/ffmpeg_enc.c
 --------------------------------------------------
-Automatically enable xcoder-params "GenHdrs=1" for MKV, HLS, ASF, and FLV output formats for video codecs for FLV
+Check desc to avoid coredump
+Fix color info will be overwrite when set params in encoder
 
 --------------------------------------------------
 ffmpeg_filter.c     fftools/ffmpeg_filter.c
@@ -57,14 +58,12 @@ ffmpeg_filter.c     fftools/ffmpeg_filter.c
 Support auto-rotate for Netint Quadra hardware frames using ni_quadra_rotate filter
 Add a more descriptive error message when using autoscale with hardware frames and sequence change
 Send hw filtered frames one by one
-Fix timing info of the first src frame of filter
 When choosing input to read frame from, if all inputs have ended, return EOF instead of asserting
 
 --------------------------------------------------
 fftools/ffmpeg_mux_init.c
 --------------------------------------------------
-Add ffmpeg option ni_interval_fps to display window averaged processing FPS
-Increase `ms->max_muxing_queue_size` from 128 to 512
+Automatically enable xcoder-params "GenHdrs=1" for MKV, HLS, ASF, and FLV output formats for video codecs for FLV
 
 --------------------------------------------------
 ffmpeg_ni_quad.c    fftools/ffmpeg_ni_quad.c
@@ -116,7 +115,7 @@ only update codec framerate when par->framerate valid
 --------------------------------------------------
 libavcodec/decode.c
 --------------------------------------------------
-Do not drop decoded frame with AV_FRAME_FLAG_DISCARD
+Skip copy global DISPLAYMATRIX to encoder
 
 --------------------------------------------------
 libavcodec/h264_mp4toannexb_bsf.c
@@ -143,9 +142,13 @@ Do not prepend headers to IRAP frame packets if VPS/PPS is already part of frame
 Pass AV_PKT_DATA_NEW_EXTRADATA to AVCodecParameters->extradata
 
 --------------------------------------------------
-libavcodec/hevc_parser.c
+libavcodec/hevc/hevcdec.c
+libavcodec/hevc/hevcdec.h
+libavcodec/hevc/parser.c
+libavcodec/hevc/sei.c
+libavcodec/hevc/sei.h
 --------------------------------------------------
-Add support for parsing 4 byte NALU start code
+Allow for Netint custom SEI passthrough with H264 and H265 software decoders with command line option 'custom_sei_passthru'
 
 --------------------------------------------------
 libavcodec/Makefile
@@ -311,6 +314,11 @@ Add 'ni_quadra_sdl' as a filter to display frames to monitor via Simple Directme
 libavfilter/avfiltergraph.c
 --------------------------------------------------
 Skip format conversion check for ni_quadra_overlay and ni_quadra_xstack
+
+--------------------------------------------------
+libavfilter/buffersrc.c
+--------------------------------------------------
+Fix color_range not changed when YUVJ to YUV
 
 --------------------------------------------------
 libavfilter/Makefile

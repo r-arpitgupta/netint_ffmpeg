@@ -26,9 +26,14 @@
 
 #include <float.h>  /* DBL_MAX */
 
+#include "nifilter.h"
 #include "filters.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #include "video.h"
 #include "libavutil/avstring.h"
 #include "libavutil/common.h"
@@ -39,7 +44,6 @@
 #include "libavutil/parseutils.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/opt.h"
-#include "nifilter.h"
 #include "drawutils.h"
 
 static const char *const var_names[] = {
@@ -157,7 +161,10 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
 
     if (inlink->format == AV_PIX_FMT_NI_QUAD)
     {
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *li = ff_filter_link(inlink);
+        AVBufferRef *avhwref = (AVBufferRef *)li->hw_frames_ctx;
+#elif IS_FFMPEG_342_AND_ABOVE
         AVBufferRef *avhwref = (AVBufferRef *)inlink->hw_frames_ctx;
 #else
         AVBufferRef *avhwref = (AVBufferRef *)in->hw_frames_ctx;
@@ -311,7 +318,10 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
     outlink->h = s->h;
 
     ctx           = (AVFilterContext *)outlink->src;
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
 #else
     in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
@@ -339,6 +349,22 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
     {
         //skip hardware pad
         s->skip_filter = 1;
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *lt = ff_filter_link(outlink->src->inputs[0]);
+
+        s->out_frames_ref = av_buffer_ref(lt->hw_frames_ctx);
+        if(!s->out_frames_ref)
+        {
+            return AVERROR(ENOMEM);
+        }
+        FilterLink *lo = ff_filter_link(outlink);
+        av_buffer_unref(&lo->hw_frames_ctx);
+        lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+        if(!lo->hw_frames_ctx)
+        {
+            return AVERROR(ENOMEM);
+        }
+#else
         AVFilterLink *inlink_for_skip = outlink->src->inputs[0];
 
         s->out_frames_ref = av_buffer_ref(inlink_for_skip->hw_frames_ctx);
@@ -353,6 +379,7 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
         {
             return AVERROR(ENOMEM);
         }
+#endif
 
         return 0;
     }
@@ -372,12 +399,20 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
 
     av_hwframe_ctx_init(s->out_frames_ref);
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(outlink);
+    av_buffer_unref(&lo->hw_frames_ctx);
+
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     av_buffer_unref(&outlink->hw_frames_ctx);
 
     outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
     if (!outlink->hw_frames_ctx)
         return AVERROR(ENOMEM);
-
+#endif
     return 0;
 }
 

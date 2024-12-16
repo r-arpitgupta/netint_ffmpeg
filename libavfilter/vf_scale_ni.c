@@ -27,9 +27,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "nifilter.h"
 #include "filters.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 
  // Needed for FFmpeg-n4.3+
 #if (LIBAVFILTER_VERSION_MAJOR >= 8 || LIBAVFILTER_VERSION_MAJOR >= 7 && LIBAVFILTER_VERSION_MINOR >= 85)
@@ -47,7 +52,6 @@
 #include "libavutil/imgutils.h"
 #include "libavutil/avassert.h"
 #include "libswscale/swscale.h"
-#include "nifilter.h"
 
 enum OutputFormat {
     OUTPUT_FORMAT_YUV420P,
@@ -287,7 +291,14 @@ static int config_props(AVFilterLink *outlink, AVFrame *in)
         return AVERROR(EINVAL);
     }
 
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data; 
+#elif IS_FFMPEG_342_AND_ABOVE
     if (ctx->inputs[0]->hw_frames_ctx == NULL) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
@@ -349,8 +360,21 @@ static int config_props(AVFilterLink *outlink, AVFrame *in)
         //skip hardware scale
         scale->skip_filter = 1;
 
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *lo = ff_filter_link(outlink);
+        scale->out_frames_ref = av_buffer_ref(li->hw_frames_ctx);
+        if(!scale->out_frames_ref)
+        {
+            return AVERROR(ENOMEM);
+        }
+        av_buffer_unref(&lo->hw_frames_ctx);
+        lo->hw_frames_ctx = av_buffer_ref(scale->out_frames_ref);
+        if(!lo->hw_frames_ctx)
+        {
+            return AVERROR(ENOMEM);
+        }
+#else
         AVFilterLink *inlink_for_skip = outlink->src->inputs[0];
-
         scale->out_frames_ref = av_buffer_ref(inlink_for_skip->hw_frames_ctx);
         if(!scale->out_frames_ref)
         {
@@ -363,6 +387,7 @@ static int config_props(AVFilterLink *outlink, AVFrame *in)
         {
             return AVERROR(ENOMEM);
         }
+#endif
         return 0;
     }
 
@@ -384,12 +409,19 @@ static int config_props(AVFilterLink *outlink, AVFrame *in)
 
     av_hwframe_ctx_init(scale->out_frames_ref);//call this?
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lt = ff_filter_link(ctx->outputs[0]);
+    av_buffer_unref(&lt->hw_frames_ctx);
+    lt->hw_frames_ctx = av_buffer_ref(scale->out_frames_ref);
+    if (!lt->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
     ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(scale->out_frames_ref);
 
     if (!ctx->outputs[0]->hw_frames_ctx)
         return AVERROR(ENOMEM);
-
+#endif
     return 0;
 
 fail:

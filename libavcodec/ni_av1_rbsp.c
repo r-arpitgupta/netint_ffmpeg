@@ -606,24 +606,24 @@ static size_t ni_av1_get_payload_bytes_left(GetBitContext *gbc)
 #undef infer
 #undef byte_alignment
 
-void av1_bitstream_fetch(const PutBitContext *stream, AVPacket *pkt,
+void netint_av1_bitstream_fetch(const PutBitContext *stream, AVPacket *pkt,
                         size_t size) {
     memcpy(pkt->data, stream->buf, size);
     pkt->size = size;
 }
 
-void av1_bitstream_reset(PutBitContext *stream) {
+void netint_av1_bitstream_reset(PutBitContext *stream) {
     init_put_bits(stream, stream->buf, MAX_PUT_BUF_SIZE);
 }
 
-int av1_write_leb128(CodedBitstreamContext *ctx, PutBitContext *s, const char *name, uint64_t value)
+int netint_av1_write_leb128(CodedBitstreamContext *ctx, PutBitContext *s, const char *name, uint64_t value)
 {
     ni_av1_write_leb128(ctx, s, name, value, 0);
 
     return 0;
 }
 
-int av1_write_le32(CodedBitstreamContext *ctx, PutBitContext *s, const char *name, uint32_t value)
+int netint_av1_write_le32(CodedBitstreamContext *ctx, PutBitContext *s, const char *name, uint32_t value)
 {
     uint32_t dst = 0;
     uint8_t *byte = (uint8_t *)&dst;
@@ -638,7 +638,7 @@ int av1_write_le32(CodedBitstreamContext *ctx, PutBitContext *s, const char *nam
     return 0;
 }
 
-int av1_update_obu_data_length(CodedBitstreamContext *ctx, PutBitContext *s,
+int netint_av1_update_obu_data_length(CodedBitstreamContext *ctx, PutBitContext *s,
         int start_pos, /*AV1RawTileData *td,*/ AV1RawOBU *obu, PutBitContext *pbc_tmp, int add_trailing_bits)
 {
     int data_pos, end_pos, obu_size;
@@ -685,7 +685,7 @@ int av1_update_obu_data_length(CodedBitstreamContext *ctx, PutBitContext *s,
     return obu_size;
 }
 
-int av1_write_obu_header(CodedBitstreamContext *ctx, PutBitContext *rw,
+int netint_av1_write_obu_header(CodedBitstreamContext *ctx, PutBitContext *rw,
                                 AV1RawOBUHeader *current)
 {
     ni_av1_write_obu_header(ctx, rw, current);
@@ -693,14 +693,14 @@ int av1_write_obu_header(CodedBitstreamContext *ctx, PutBitContext *rw,
     return 0;
 }
 
-int av1_write_sequence_header_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *current)
+int netint_av1_write_sequence_header_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *current)
 {
     ni_av1_write_sequence_header_obu(ctx, rw,  current);
 
     return 0;
 }
 
-int av1_write_temporal_delimiter_obu(CodedBitstreamContext *ctx, PutBitContext *s)
+int netint_av1_write_temporal_delimiter_obu(CodedBitstreamContext *ctx, PutBitContext *s)
 {
     ni_av1_write_temporal_delimiter_obu(ctx, s);
 
@@ -708,20 +708,20 @@ int av1_write_temporal_delimiter_obu(CodedBitstreamContext *ctx, PutBitContext *
 }
 
 #ifdef NOFRAMEOBU
-int av1_write_frame_header_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawFrameHeader *current)
+int netint_av1_write_frame_header_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawFrameHeader *current)
 {
     ni_av1_write_frame_header_obu(ctx, rw, current, 0, NULL);
     return 0;
 }
 
-int av1_write_tile_group_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawTileGroup *current)
+int netint_av1_write_tile_group_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawTileGroup *current)
 {
   ni_av1_write_tile_group_obu(ctx, rw, current);
   return 0;
 }
 
 #else
-int av1_write_frame_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawFrame *current)
+int netint_av1_write_frame_obu(CodedBitstreamContext *ctx, PutBitContext *rw, AV1RawSequenceHeader *seq, AV1RawFrame *current)
 {
     CodedBitstreamAV1Context *priv = ctx->priv_data;
 #ifdef PLOG

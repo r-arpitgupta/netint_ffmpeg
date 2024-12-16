@@ -30,15 +30,19 @@
 #include "libavutil/opt.h"
 #include "libswscale/swscale.h"
 
+#include "nifilter.h"
 #include "filters.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #if HAVE_IO_H
 #include <io.h>
 #endif
 #include "ni_device_api.h"
 #include "ni_util.h"
-#include "nifilter.h"
 #include "video.h"
 
 #include "libavutil/avassert.h"
@@ -616,8 +620,10 @@ static int nibgr_config_output(AVFilterLink *outlink, AVFrame *in)
     av_log(ctx, AV_LOG_DEBUG, "%s\n", __func__);
 
     av_buffer_unref(&s->hwframe);
-
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if (li->hw_frames_ctx == NULL) {
+#elif IS_FFMPEG_342_AND_ABOVE
     if (inlink->hw_frames_ctx == NULL) {
 #else
     if (in->hw_frames_ctx == NULL) {
@@ -651,6 +657,14 @@ static int nibgr_config_output(AVFilterLink *outlink, AVFrame *in)
 
     av_log(ctx, AV_LOG_DEBUG, "outlink wxh %dx%d\n", outlink->w, outlink->h);
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(outlink);
+    init_out_hwframe_ctx(ctx, (AVHWFramesContext *)li->hw_frames_ctx->data);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
 #if IS_FFMPEG_342_AND_ABOVE
     init_out_hwframe_ctx(ctx, (AVHWFramesContext *)inlink->hw_frames_ctx->data);
 #endif
@@ -660,6 +674,7 @@ static int nibgr_config_output(AVFilterLink *outlink, AVFrame *in)
     outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
     if (!outlink->hw_frames_ctx)
         return AVERROR(ENOMEM);
+#endif
 
     return 0;
 }
@@ -838,7 +853,7 @@ static int ni_hwframe_scale(AVFilterContext *ctx, NiBgrContext *s, AVFrame *in,
         frame_surface->ui16FrameIdx, NI_DEVICE_TYPE_SCALER);
 
     if (retcode != NI_RETCODE_SUCCESS) {
-        av_log(NULL, AV_LOG_DEBUG, "Can't allocate device input frame %d\n",
+        av_log(ctx, AV_LOG_DEBUG, "Can't allocate device input frame %d\n",
                retcode);
         return AVERROR(ENOMEM);
     }
@@ -851,7 +866,7 @@ static int ni_hwframe_scale(AVFilterContext *ctx, NiBgrContext *s, AVFrame *in,
         0, 0, 0, -1, NI_DEVICE_TYPE_SCALER);
 
     if (retcode != NI_RETCODE_SUCCESS) {
-        av_log(NULL, AV_LOG_DEBUG, "Can't allocate device output frame %d\n",
+        av_log(ctx, AV_LOG_DEBUG, "Can't allocate device output frame %d\n",
                retcode);
         return AVERROR(ENOMEM);
     }
@@ -936,7 +951,7 @@ static int ni_hwframe_convert_format(AVFilterContext *ctx, NiBgrContext *s,
                                     NI_DEVICE_TYPE_SCALER);
 
     if (retcode != NI_RETCODE_SUCCESS) {
-        av_log(NULL, AV_LOG_DEBUG,
+        av_log(ctx, AV_LOG_DEBUG,
                "Can't allocate device input frame for format conversion %d\n",
                retcode);
         return AVERROR(ENOMEM);
@@ -951,7 +966,7 @@ static int ni_hwframe_convert_format(AVFilterContext *ctx, NiBgrContext *s,
                                     NI_DEVICE_TYPE_SCALER);
 
     if (retcode != NI_RETCODE_SUCCESS) {
-        av_log(NULL, AV_LOG_DEBUG,
+        av_log(ctx, AV_LOG_DEBUG,
                "Can't allocate device output frame for format conversion %d\n",
                retcode);
         return AVERROR(ENOMEM);
@@ -962,7 +977,7 @@ static int ni_hwframe_convert_format(AVFilterContext *ctx, NiBgrContext *s,
                                             &format_ctx->api_dst_frame,
                                             NI_DEVICE_TYPE_SCALER);
     if (retcode != NI_RETCODE_SUCCESS) {
-        av_log(NULL, AV_LOG_DEBUG,
+        av_log(ctx, AV_LOG_DEBUG,
                "Can't get the scaler output frame index %d\n", retcode);
         return AVERROR(ENOMEM);
     }
@@ -1013,8 +1028,7 @@ static int ni_bgr_create_output(AVFilterContext* ctx, AVFrame* in, AVFrame** rea
     out->width         = in->width;
     out->height        = in->height;
     out->format        = AV_PIX_FMT_NI_QUAD;
-    out->color_range   = AVCOL_RANGE_MPEG;
-    out->hw_frames_ctx = s->out_frames_ref;
+    out->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
 
     ret = av_hwframe_get_buffer(s->hw_frames_ctx, out, 0);
     if (ret < 0) {
@@ -1027,10 +1041,10 @@ static int ni_bgr_create_output(AVFilterContext* ctx, AVFrame* in, AVFrame** rea
     s->alpha_enlarge_frame->format = AV_PIX_FMT_RGBA;
     ret = av_hwframe_transfer_data(out, // dst src flags
                                    s->alpha_enlarge_frame, 0);
+
     //There is a upload frame buffer transfer in hwupload filter
     //but all measurements show no harm in perf for now
     //we can probably skip that transfer if it ever gets down to it
-
 
     *realout = out;
     return ret;
@@ -1192,7 +1206,7 @@ static int nibgr_filter_frame(AVFilterLink *link, AVFrame *in)
     logging_surface = (niFrameSurface1_t*)in->data[3];
     logging_surface_out = (niFrameSurface1_t*)realout->data[3];
     av_log(link->dst, AV_LOG_DEBUG,
-        "vf_bgr_ni.c:IN trace ui16FrameIdx = [%d] --> out [%d] \n",
+        "vf_bgr_ni.c:IN trace ui16FrameIdx = [%d] --> out [%d]\n",
         logging_surface->ui16FrameIdx, logging_surface_out->ui16FrameIdx);
 
     av_frame_free(&in);
@@ -1215,23 +1229,40 @@ static int activate(AVFilterContext *ctx)
 {
     AVFilterLink  *inlink = ctx->inputs[0];
     AVFilterLink  *outlink = ctx->outputs[0];
+    NiBgrContext *s = ctx->priv;
     AVFrame *frame = NULL;
+    AVHWFramesContext *hwfc;
+    NIFramesContext *ni_ctx;
     int ret = 0;
-    NiBgrContext *s = inlink->dst->priv;
 
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
     if (ff_inlink_check_available_frame(inlink))
     {
-        // Consume from inlink framequeue only when outlink framequeue is empty, to prevent filter from exhausting all pre-allocated device buffers
-        if (ff_inlink_check_available_frame(outlink))
+        if (s->initialized)
+        {
+            hwfc = (AVHWFramesContext *) s->hw_frames_ctx->data;
+            ni_ctx = hwfc->internal->priv;
+
+            ret = ni_device_session_query_buffer_avail(&ni_ctx->api_ctx, NI_DEVICE_TYPE_UPLOAD);
+        }
+
+        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
+        {
+            av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
+        }
+        else if (ret < 0)
+        {
+            av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %lu available_frame %d outlink framequeue %lu frame_wanted %d - return NOT READY\n",
+                __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
             return FFERROR_NOT_READY;
-    
+        }
+
         ret = ff_inlink_consume_frame(inlink, &frame);
         if (ret < 0)
             return ret;
-	    
+
         return nibgr_filter_frame(inlink, frame);
     }
 

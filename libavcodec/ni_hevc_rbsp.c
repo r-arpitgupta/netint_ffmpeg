@@ -37,10 +37,19 @@
 #include <libavcodec/avcodec.h>
 #include <libavcodec/cbs_h265.h>
 #include <libavcodec/h2645_parse.h>
+#if ((LIBAVCODEC_VERSION_MAJOR > 61) || (LIBAVCODEC_VERSION_MAJOR == 61 && LIBAVCODEC_VERSION_MINOR >= 19))
+#include <libavcodec/hevc/hevc.h>
+#include <libavcodec/hevc/ps.h>
+#include <libavcodec/hevc/sei.h>
+#include <libavcodec/hevc/hevcdec.h>
+#include "libavutil/mem.h"
+#else
 #include <libavcodec/hevc.h>
 #include <libavcodec/hevc_ps.h>
 #include <libavcodec/hevc_sei.h>
 #include <libavcodec/hevcdec.h>
+#endif
+
 #include <libavutil/internal.h>
 
 #include "ni_hevc_rbsp.h"

@@ -33,7 +33,10 @@
 #include "avfilter.h"
 #include "audio.h"
 #include "formats.h"
+#include "version.h"
+#if !(LIBAVFILTER_VERSION_MAJOR > 10 || (LIBAVFILTER_VERSION_MAJOR == 10 && LIBAVFILTER_VERSION_MINOR >= 4))
 #include "internal.h"
+#endif
 #include "video.h"
 
 typedef struct TransContext {

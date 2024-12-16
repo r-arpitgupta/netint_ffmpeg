@@ -26,9 +26,14 @@
 
 #include <stdio.h>
 
+#include "nifilter.h"
 #include "filters.h"
 #include "formats.h"
+#if !IS_FFMPEG_71_AND_ABOVE
 #include "internal.h"
+#else
+#include "libavutil/mem.h"
+#endif
 #include "video.h"
 #include "libavutil/eval.h"
 #include "libavutil/avstring.h"
@@ -37,7 +42,7 @@
 #include "libavutil/imgutils.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/opt.h"
-#include "nifilter.h"
+
 #include <ni_device_api.h>
 
 static const char *const var_names[] = {
@@ -164,7 +169,14 @@ static int config_input(AVFilterLink *link, AVFrame *in)
 #endif
 {
     AVFilterContext *ctx = link->dst;
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(link);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    AVHWFramesContext *hwctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     if (link->hw_frames_ctx == NULL) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
@@ -310,7 +322,10 @@ static int config_output(AVFilterLink *link, AVFrame *in)
     link->sample_aspect_ratio = s->out_sar;
 
     ctx           = (AVFilterContext *)link->src;
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
     in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
 #else
     in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
@@ -335,6 +350,20 @@ static int config_output(AVFilterLink *link, AVFrame *in)
         //skip hardware crop
         s->skip_filter = 1;
 
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *lo = ff_filter_link(link);
+        s->out_frames_ref = av_buffer_ref(li->hw_frames_ctx);
+        if(!s->out_frames_ref)
+        {
+            return AVERROR(ENOMEM);
+        }
+        av_buffer_unref(&lo->hw_frames_ctx);
+        lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+        if(!lo->hw_frames_ctx)
+        {
+            return AVERROR(ENOMEM);
+        }
+#else
         AVFilterLink *inlink_for_skip = link->src->inputs[0];
 
         s->out_frames_ref = av_buffer_ref(inlink_for_skip->hw_frames_ctx);
@@ -349,7 +378,7 @@ static int config_output(AVFilterLink *link, AVFrame *in)
         {
             return AVERROR(ENOMEM);
         }
-
+#endif
         return 0;
     }
 
@@ -368,12 +397,20 @@ static int config_output(AVFilterLink *link, AVFrame *in)
 
     av_hwframe_ctx_init(s->out_frames_ref);
 
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(link);
+    av_buffer_unref(&lo->hw_frames_ctx);
+
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
     av_buffer_unref(&link->hw_frames_ctx);
 
     link->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
     if (!link->hw_frames_ctx)
         return AVERROR(ENOMEM);
-
+#endif
     return 0;
 }
 
@@ -471,8 +508,10 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
 
         s->initialized = 1;
     }
-
-#if IS_FFMPEG_342_AND_ABOVE
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *l = ff_filter_link(link);
+    s->var_values[VAR_N] = l->frame_count_out;
+#elif IS_FFMPEG_342_AND_ABOVE
     s->var_values[VAR_N] = link->frame_count_out;
 #else
     s->var_values[VAR_N] = link->frame_count;

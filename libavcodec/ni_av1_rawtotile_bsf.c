@@ -42,8 +42,9 @@
 #include "cbs.h"
 #include "cbs_av1.h"
 #include "ni_av1_rbsp.h"
-
-
+#if ((LIBAVCODEC_VERSION_MAJOR > 61) || (LIBAVCODEC_VERSION_MAJOR == 61 && LIBAVCODEC_VERSION_MINOR >= 19))
+#include "libavutil/mem.h"
+#endif
 typedef struct AV1FtoTileContext {
     AVPacket *buffer_pkt;
     CodedBitstreamContext *cbc;
