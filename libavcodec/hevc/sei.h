@@ -59,14 +59,6 @@ typedef struct HEVCSEIAlternativeTransfer {
     int preferred_transfer_characteristics;
 } HEVCSEIAlternativeTransfer;
 
-#if CONFIG_NI_LOGAN
-typedef struct HEVCSEINICustom {
-    AVBufferRef *buf_ref;
-    int location;
-    int type;
-} HEVCSEINICustom;
-#endif
-
 typedef struct HEVCSEITimeCode {
     int      present;
     uint8_t  num_clock_ts;
@@ -110,10 +102,6 @@ typedef struct HEVCSEI {
     int active_seq_parameter_set_id;
     HEVCSEITimeCode timecode;
     HEVCSEITDRDI tdrdi;
-    #if CONFIG_NI_LOGAN
-    // NETINT: NI HEVC custom SEI
-    HEVCSEINICustom ni_custom;
-#endif
 } HEVCSEI;
 
 struct HEVCParamSets;
@@ -135,9 +123,6 @@ static inline int ff_hevc_sei_ctx_replace(HEVCSEI *dst, const HEVCSEI *src)
  */
 static inline void ff_hevc_reset_sei(HEVCSEI *sei)
 {
-#if CONFIG_NI_LOGAN
-    av_buffer_unref(&sei->ni_custom.buf_ref);
-#endif
     ff_h2645_sei_reset(&sei->common);
 }
 

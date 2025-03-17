@@ -24,8 +24,6 @@
 
 #include "libavutil/buffer.h"
 #include "libavutil/hwcontext.h"
-#include "libavutil/hwcontext_internal.h"
-#include "libavutil/hwcontext_ni_quad.h"
 #include "libavutil/log.h"
 #include "libavutil/opt.h"
 #include "libswscale/swscale.h"
@@ -485,8 +483,8 @@ static int init_hwframe_uploader(AVFilterContext *ctx, NiBgrContext *s,
     int ret;
     AVHWFramesContext *hwframe_ctx;
     AVHWFramesContext *out_frames_ctx;
-    NIFramesContext *ni_ctx;
-    NIFramesContext *ni_ctx_output;
+    AVNIFramesContext *ni_ctx;
+    AVNIFramesContext *ni_ctx_output;
     int cardno   = ni_get_cardno(frame);
     char buf[64] = {0};
 
@@ -517,8 +515,8 @@ static int init_hwframe_uploader(AVFilterContext *ctx, NiBgrContext *s,
 
     // Work around a hwdownload session start timestamp issue
     out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
-    ni_ctx        = hwframe_ctx->internal->priv;
-    ni_ctx_output = out_frames_ctx->internal->priv;
+    ni_ctx         = (AVNIFramesContext*) hwframe_ctx->hwctx;
+    ni_ctx_output  = (AVNIFramesContext*) out_frames_ctx->hwctx;
     ni_ctx_output->api_ctx.session_timestamp =
         ni_ctx->api_ctx.session_timestamp;
 
@@ -593,7 +591,9 @@ static int init_out_hwframe_ctx(AVFilterContext *ctx, AVHWFramesContext *in_fram
 
     out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
 
-    ff_ni_clone_hwframe_ctx(in_frames_ctx, out_frames_ctx, &s->ai_ctx->api_ctx);
+    AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+    ni_cpy_hwframe_ctx(in_frames_ctx, out_frames_ctx);
+    ni_device_session_copy(&s->ai_ctx->api_ctx, &out_ni_ctx->api_ctx);
 
     out_frames_ctx->format            = AV_PIX_FMT_NI_QUAD;
     out_frames_ctx->width             = inlink->w;
@@ -1232,7 +1232,7 @@ static int activate(AVFilterContext *ctx)
     NiBgrContext *s = ctx->priv;
     AVFrame *frame = NULL;
     AVHWFramesContext *hwfc;
-    NIFramesContext *ni_ctx;
+    AVNIFramesContext *f_hwctx;
     int ret = 0;
 
     // Forward the status on output link to input link, if the status is set, discard all queued frames
@@ -1243,9 +1243,9 @@ static int activate(AVFilterContext *ctx)
         if (s->initialized)
         {
             hwfc = (AVHWFramesContext *) s->hw_frames_ctx->data;
-            ni_ctx = hwfc->internal->priv;
+            f_hwctx = (AVNIFramesContext*) hwfc->hwctx;
 
-            ret = ni_device_session_query_buffer_avail(&ni_ctx->api_ctx, NI_DEVICE_TYPE_UPLOAD);
+            ret = ni_device_session_query_buffer_avail(&f_hwctx->api_ctx, NI_DEVICE_TYPE_UPLOAD);
         }
 
         if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)

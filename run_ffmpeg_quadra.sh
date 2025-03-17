@@ -2,9 +2,9 @@
 # Check Ni xcoder basic functions
 
 # Global variables
-major_version=""
-minor_version=""
-patch_version=""
+major_version="0"
+minor_version="0"
+patch_version="0"
 AVone_check=""
 HWaccel=""
 Quadra_suffix=""
@@ -60,7 +60,7 @@ function sudo_check() {
 
 # Function to extract and check ffmpeg version
 get_ffmpeg_version() {
-    ffmpeg_output=$(ffmpeg -version 2> /dev/null)
+    ffmpeg_output=$(./ffmpeg -version 2> /dev/null)
 
     # Use regex to extract the version number
     if [[ $ffmpeg_output =~ ffmpeg\ version\ ([0-9]+)\.([0-9]+)\.?([0-9]*) ]]; then

@@ -1872,7 +1872,7 @@ const OptionDef options[] = {
     // NETINT: add option for force enable NI hardware decoder
     { "force_nidec",      OPT_TYPE_STRING, OPT_EXPERT | OPT_OFFSET | OPT_INPUT,
         { .off = OFFSET(force_nidec) },
-        "force select Netint HW decoders (supported values: logan, quadra)" },
+        "force select Netint HW decoders (supported values:  quadra)" },
 
     /* audio options */
     { "aframes",          OPT_TYPE_FUNC,    OPT_AUDIO | OPT_FUNC_ARG | OPT_PERFILE | OPT_OUTPUT | OPT_EXPERT | OPT_HAS_CANON,

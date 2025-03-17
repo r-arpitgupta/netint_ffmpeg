@@ -444,12 +444,6 @@ enum AVPixelFormat {
 
     /**
      * HW acceleration through NI, data[3] contains a pointer to the
-     * ni_logan_hwframe_surface_t structure, for Netint Logan.
-     */
-    AV_PIX_FMT_NI_LOGAN,
-
-    /**
-     * HW acceleration through NI, data[3] contains a pointer to the
      * niFrameSurface1_t structure, for Netint Quadra.
      */
     AV_PIX_FMT_NI_QUAD,

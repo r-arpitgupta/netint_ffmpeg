@@ -190,6 +190,12 @@ while [ "$1" != "" ]; do
     shift
 done
 
+if [[ $enable_logan == "true" ]]; then
+    if [ $(awk '{print}' VERSION) == "7.1" ] ; then
+        echo -e "\e[33mError: Logan not supported in FFmpeg 7.1\e[0m"
+        exit -1
+    fi
+fi
 if [[ $enable_logan == "true" && $enable_quadra == "true" ]]; then
     product_line_flags="--enable-ni_quadra --enable-ni_logan"
 elif $enable_logan; then

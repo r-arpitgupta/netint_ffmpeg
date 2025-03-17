@@ -54,9 +54,6 @@ static const HWContextType * const hw_table[] = {
 #if CONFIG_VAAPI
     &ff_hwcontext_type_vaapi,
 #endif
-#if CONFIG_NI_LOGAN
-    &ff_hwcontext_type_ni_logan,
-#endif
 #if CONFIG_NI_QUADRA
     &ff_hwcontext_type_ni_quadra,
 #endif
@@ -83,7 +80,6 @@ static const char *const hw_type_names[] = {
     [AV_HWDEVICE_TYPE_D3D12VA] = "d3d12va",
     [AV_HWDEVICE_TYPE_OPENCL] = "opencl",
     [AV_HWDEVICE_TYPE_QSV]    = "qsv",
-    [AV_HWDEVICE_TYPE_NI_LOGAN]  = "ni_logan",
     [AV_HWDEVICE_TYPE_NI_QUADRA] = "ni_quadra",
     [AV_HWDEVICE_TYPE_VAAPI]  = "vaapi",
     [AV_HWDEVICE_TYPE_VDPAU]  = "vdpau",
@@ -248,11 +244,7 @@ static void hwframe_ctx_free(void *opaque, uint8_t *data)
     av_buffer_unref(&ctxi->source_frames);
 
     av_buffer_unref(&ctx->device_ref);
-    //NETINT
-    if (ctxi->hw_type->type == AV_HWDEVICE_TYPE_NI_QUADRA && ctxi->hw_type->frames_priv_size)
-    {
-        av_freep(&ctxi->priv);
-    }
+
     av_freep(&ctx->hwctx);
     av_freep(&ctx);
 }
@@ -293,16 +285,6 @@ AVBufferRef *av_hwframe_ctx_alloc(AVBufferRef *device_ref_in)
     ctx->sw_format  = AV_PIX_FMT_NONE;
 
     ctxi->hw_type = hw_type;
-    //NETINT for backward compatability
-    if (hw_type->type == AV_HWDEVICE_TYPE_NI_QUADRA)
-    {
-        ctx->internal = ctxi;
-        if (hw_type->frames_priv_size) {
-            ctx->internal->priv = av_mallocz(hw_type->frames_priv_size);
-            if (!ctx->internal->priv)
-                goto fail;
-        }
-    }
 
     return buf;
 

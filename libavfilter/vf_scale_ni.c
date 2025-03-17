@@ -404,9 +404,6 @@ static int config_props(AVFilterLink *outlink, AVFrame *in)
     out_frames_ctx->initial_pool_size =
         NI_SCALE_ID; // Repurposed as identity code
 
-    // NIFramesContext *internal_ni_frames_ctx = (NIFramesContext *)out_frames_ctx->internal->priv;
-    // internal_ni_frames_ctx->suspended_device_handle = NI_INVALID_DEVICE_HANDLE;
-
     av_hwframe_ctx_init(scale->out_frames_ref);//call this?
 
 #if IS_FFMPEG_71_AND_ABOVE
@@ -506,6 +503,18 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
             else
                 scale->params.filterblit = 2;
         }
+
+#if ((LIBXCODER_API_VERSION_MAJOR > 2) ||                                        \
+      (LIBXCODER_API_VERSION_MAJOR == 2 && LIBXCODER_API_VERSION_MINOR>= 76))
+        if (scale->params.scaler_param_b != 0 || scale->params.scaler_param_c != 0.75)
+        {
+            scale->params.enable_scaler_params = true;
+        }
+        else
+        {
+            scale->params.enable_scaler_params = false;
+        }
+#endif
         if (scale->params.filterblit)
         {
             retcode = ni_scaler_set_params(&scale->api_ctx, &(scale->params));
@@ -522,9 +531,10 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
             goto fail;
         }
 
-        ff_ni_clone_hwframe_ctx(
-            pAVHFWCtx, (AVHWFramesContext *)scale->out_frames_ref->data,
-            &scale->api_ctx);
+        AVHWFramesContext *out_frames_ctx = (AVHWFramesContext *)scale->out_frames_ref->data;
+        AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+        ni_cpy_hwframe_ctx(pAVHFWCtx, out_frames_ctx);
+        ni_device_session_copy(&scale->api_ctx, &out_ni_ctx->api_ctx);
 
         if (in->color_range == AVCOL_RANGE_JPEG) {
             av_log(link->dst, AV_LOG_WARNING,
@@ -783,6 +793,11 @@ static const AVOption scale_options[] = {
     { "increase", NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 2 }, 0, 0, FLAGS, "force_oar" },
     { "force_divisible_by", "enforce that the output resolution is divisible by a defined integer when force_original_aspect_ratio is used", OFFSET(force_divisible_by), AV_OPT_TYPE_INT, { .i64 = 1}, 1, 256, FLAGS },
     { "filterblit", "filterblit enable", OFFSET(params.filterblit), AV_OPT_TYPE_INT, {.i64=0}, 0, 2, FLAGS },
+#if ((LIBXCODER_API_VERSION_MAJOR > 2) ||                                        \
+      (LIBXCODER_API_VERSION_MAJOR == 2 && LIBXCODER_API_VERSION_MINOR>= 76))
+    { "param_b", "Parameter B for bicubic", OFFSET(params.scaler_param_b), AV_OPT_TYPE_DOUBLE, {.dbl=0.0}, 0, 1, FLAGS },
+    { "param_c", "Parameter C for bicubic", OFFSET(params.scaler_param_c), AV_OPT_TYPE_DOUBLE, {.dbl=0.75}, 0, 1, FLAGS },
+#endif
     { "autoselect", "auto select filterblit mode according to resolution", OFFSET(autoselect), AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGS },
     { "is_p2p",  "enable p2p transfer", OFFSET(is_p2p), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
     { "auto_skip", "skip the scale filter when input and output of this filter are the same", OFFSET(auto_skip), AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGS},

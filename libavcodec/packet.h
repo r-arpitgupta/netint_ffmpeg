@@ -355,6 +355,11 @@ enum AVPacketSideDataType {
      */
     AV_PKT_DATA_LCEVC,
 
+   /**
+     * NETINT: Reset PPU output resolution
+     */
+    AV_PKT_DATA_PPU_CONFIG,
+
     /**
      * The number of side data types.
      * This is not part of the public API/ABI in the sense that it may
@@ -365,6 +370,13 @@ enum AVPacketSideDataType {
      */
     AV_PKT_DATA_NB
 };
+
+typedef struct AVNIPpuConfig
+{
+    uint16_t out_enabled[3];
+    uint16_t ppu_w[3];
+    uint16_t ppu_h[3];
+} AVNIPpuConfig;
 
 #if FF_API_QUALITY_FACTOR
 #define AV_PKT_DATA_QUALITY_FACTOR AV_PKT_DATA_QUALITY_STATS //DEPRECATED

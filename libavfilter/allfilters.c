@@ -561,8 +561,6 @@ extern const AVFilter ff_vf_yadif_videotoolbox;
 extern const AVFilter ff_vf_yaepblur;
 extern const AVFilter ff_vf_yuv420to444_ni_quadra;
 extern const AVFilter ff_vf_yuv444to420_ni_quadra;
-// NETINT: ni logan filters must be added after all quadra filters added
-extern const AVFilter ff_vf_hwupload_ni_logan;
 extern const AVFilter ff_vf_zmq;
 extern const AVFilter ff_vf_zoompan;
 extern const AVFilter ff_vf_zscale;

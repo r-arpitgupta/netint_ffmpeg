@@ -847,10 +847,12 @@ static int ni_roi_config_input(AVFilterContext *ctx, AVFrame *frame)
                    "could not initialize hwframe scale context\n");
             goto fail_out;
         }
-        
-        ff_ni_clone_hwframe_ctx((AVHWFramesContext *)frame->hw_frames_ctx->data, 
-                                (AVHWFramesContext *)s->out_frames_ref->data,
-                                &s->ai_ctx->api_ctx);
+
+        AVHWFramesContext *in_frames_ctx = (AVHWFramesContext *)frame->hw_frames_ctx->data;
+        AVHWFramesContext *out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
+        AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+        ni_cpy_hwframe_ctx(in_frames_ctx, out_frames_ctx);
+        ni_device_session_copy(&s->ai_ctx->api_ctx, &out_ni_ctx->api_ctx);
     }
 
     s->initialized = 1;
@@ -953,14 +955,15 @@ static int ni_roi_output_config_props(AVFilterLink *outlink)
         return AVERROR(EINVAL);
     }
 
-
     s->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
     if (!s->out_frames_ref)
         return AVERROR(ENOMEM);
 
     out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
 
-    ff_ni_clone_hwframe_ctx(in_frames_ctx, out_frames_ctx, &s->ai_ctx->api_ctx);
+    AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+    ni_cpy_hwframe_ctx(in_frames_ctx, out_frames_ctx);
+    ni_device_session_copy(&s->ai_ctx->api_ctx, &out_ni_ctx->api_ctx);
 
     out_frames_ctx->format            = AV_PIX_FMT_NI_QUAD;
     out_frames_ctx->width             = outlink->w;

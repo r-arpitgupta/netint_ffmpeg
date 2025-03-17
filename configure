@@ -3342,7 +3342,6 @@ scale_ni_quadra_filter_deps="ni_quadra"
 split_ni_quadra_filter_deps="ni_quadra"
 xstack_ni_quadra_filter_deps="ni_quadra"
 p2pxfer_ni_quadra_filter_deps="ni_quadra"
-hwupload_ni_logan_filter_deps="ni_logan"
 ai_pre_ni_quadra_filter_deps="ni_quadra"
 hvsplus_ni_quadra_filter_deps="ni_quadra"
 delogo_ni_quadra_filter_deps="ni_quadra"
@@ -3618,10 +3617,6 @@ av1_ni_quadra_encoder_deps="ni_quadra"
 h264_ni_quadra_encoder_deps="ni_quadra"
 h265_ni_quadra_encoder_deps="ni_quadra"
 jpeg_ni_quadra_encoder_deps="ni_quadra"
-h264_ni_logan_decoder_deps="ni_logan"
-h265_ni_logan_decoder_deps="ni_logan"
-h264_ni_logan_encoder_deps="ni_logan"
-h265_ni_logan_encoder_deps="ni_logan"
 libx265_encoder_select="atsc_a53 dovi_rpuenc"
 libxavs_encoder_deps="libxavs"
 libxavs2_encoder_deps="libxavs2"
@@ -6889,9 +6884,14 @@ for func in $MATH_FUNCS; do
     eval check_mathfunc $func \${${func}_args:-1} $libm_extralibs
 done
 
-# Check Netint driver dependencies
-enabled ni_quadra && check_pkg_config ni_quadra xcoder ni_device_api.h ni_device_open || disable ni_quadra
-enabled ni_logan && check_pkg_config ni_logan xcoder_logan ni_device_api_logan.h ni_logan_device_open || disable ni_logan
+# Auto-detect ni_quadra and check libxcoder API version
+if enabled ni_quadra; then
+    if ! check_pkg_config ni_quadra xcoder ni_device_api.h ni_device_open; then
+        disable_with_reason ni_quadra "libxcoder not found"
+    elif ! check_cpp_condition xcoder ni_defs.h "LIBXCODER_API_VERSION_MAJOR == 2 && LIBXCODER_API_VERSION_MINOR >= 70"; then
+        disable_with_reason ni_quadra "libxcoder API version must be >= 2.70"
+    fi
+fi
 
 # these are off by default, so fail if requested and not available
 enabled avisynth          && { require_headers "avisynth/avisynth_c.h avisynth/avs/version.h" &&

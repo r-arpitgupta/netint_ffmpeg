@@ -1,4 +1,69 @@
 ================================================================================
+Release version: 5.2.0_RC3
+Date: 2025-03-13            SW version: 5.2.0_RC3           FW version: 5.2.0_RC1
+Compat FW API ver: 6s5      Libxcoder API ver: 2.76
+--------------------------------------------------------------------------------
+[FFMPEG] FFmpeg-n7.1 remove skip format conversion check for ni overlay/xstack
+[LIBAVFILTER] Fix an issue where the drawtext filter did not copy AVHWFramesContext to dst frame
+[LIBAVFILTER] Support config bicubic params for ni_quadra_scale and ni_quadra_merge
+              Changing FW API version to 6s2
+              Changing Libxcoder API version to 2.76
+[LIBAVCODEC] Support reconstructed frames luma channel for hevc with getPsnrMode=4
+[FFMPEG/LIBAVCODEC] Add AV_FRAME_DATA_NETINT_ERROR_RATIO to save decoded frame error ratio info
+                    Changing Libxcoder API version to 2.75
+[LIBAVCODEC] Add a fix to prevent device handler replacement in HW frame from causing usage errors
+[FFMPEG] Automatically enable gen_global_headers for MKV/HLS/ASF/FLV containers only for video
+[FFMPEG/LIBAVCODEC/LIBAVFILTER] Remove usage of AVHWFrameContext->opaque and AVHWFrameContext->internal
+                                change ni_clone_hwframe_ctx() to ni_cpy_hwframe_ctx()
+                                add logan/quadra to libavutil/Makefile headers to skip for compile checks
+                                move hwcontext_ni_quad private struct to public as a necessary measure to allow ni_cpy_hwframe_ctx() to be defined wholly in header
+                                update P2P api example for new location of AVNIFramesContext
+[LIBAVFILTER] Fix ai_pre memory leak with invalid hwdownload command
+[FFMPEG/LIBAVCODEC] Deprecate libxcoder option 'genHdrs', replace with libavcodec option '-gen_global_headers'
+                    '-gen_global_headers' also added for logan codecs, but 'genHdrs' not deprecated in logan
+                    Also refactor libavcodec encoder params
+                    Changing Libxcoder API version to 2.74
+[FFMPEG] Remove copy of HDR characteristics as it is redundant
+[FFMPEG] Add libxcoder API version check to FFmpeg*/configure
+[FFMPEG] Fix inconsistency in run_ffmpeg_quadra.sh where FFmpeg version is read from $PATH/ffmpeg but commands are run from ./ffmpeg
+[FFMPEG/LIBAVCODEC] Remove old FIFO API wrappers, refactor nienc.c and apiexamples to use new FIFO API
+[FFMPEG] Revise printouts during init_rsrc
+         Remove FW to Libxcoder minor version mismatch warning during HW frame session start
+[FFMPEG] Remove unnecessary decoder error handling in FFmpeg-n6.1 and n7.1
+[LIBAVCODEC] Fix an issue where the bitrate was unstable in CBR mode
+[FFMPEG/LIBAVCODEC] Move setting of maxExtraHwFrameCnt=0 from fftools/ffmpeg_dec.c to nidec.c in FFmpeg-n7.1
+[LIBAVFILTER] Remove unecessary HW buffer aquire for merge filter to improve latency
+[FFMPEG/LIBAVCODEC/LIBAVFILTER] Remove Logan references in FFmpeg-n7.1
+[FFMPEG/LIBAVCODEC/LIBAVFILTER] Support h264/h265 decoder ppu resolution reconfig when sequence change
+                                Changing Libxcoder API version to 2.70
+                                Changing FW API version to 6rx
+[LIBAVFILTER] Fix an issue with ni_quadra_merge causing high FW load
+[FFMPEG/LIBAVCODEC/LIBAVFILTER] Remove support for FFmpeg-n7.0
+[LIBAVCODEC] Support AV1 multiple spatial layers encode
+             Changing FW API version to 6rw
+             Changing libxcoder API version to 2.69
+[LIBAVFILTER] Fix issue with ni_quadra_bgr + ni_quadra_overlay
+[FFMPEG/LIBAVCODEC/LIBAVFILTER] Fix misuse of opaque pointer for storing card number
+[FFMPEG] Add openharmony support
+[LIBAVFILTER] Add backpressure support for ni_quadra_drawtext
+[FFMPEG] Remove previous netint fix from FFmpeg-n7.0+ as it is unnecessary
+[LIBAVFILTER] Add backpressure support to ni_quadra_bg and ni_quadra_bgr filters
+[LIBAVCODEC] Fix '--libaom' compile failed due to the lastest aom version have same name func
+[FFMPEG] Restore official FFmpeg patch 0f824d79
+[LIBAVFILTER] Add ni_quadra_drawtext support for flexible setting of background area
+[FFMPEG] Update public README in Libxcoder/FFmpeg
+[FFMPEG] Fix build ffmpeg failed with '--logan --quadra --static'
+[LIBAVCODEC] Transfer SPS/PPS of AVC in extradata to FW for quadra card
+[FFMPEG] Add backpressure support for FFmpeg 6.1 ,7.0 and 7.1  hwupload filter
+[LIBAVFILTER] Fixed hvsplus for some odd resolutions
+[LIBAVFILTER] Remove buffer acquire for ni_quadra_bgr filter
+[FFMPEG/LIBAVCODEC/LIBAVFILTER] Add FFmpeg-n7.1 Support
+[FFMPEG/LIBAVCODEC/LIBAVFILTER] Buffer backpressure support for FFmpeg filters
+                                Changing FW API version to 6rt
+                                Changing libxcoder API version to 2.67
+[FFMPEG/LIBAVFILTER] Added the support of hwframe for hvsplus filter
+[LIBAVCODEC] Fix an issue where pixel format in decoded frame is inconsistent when there is a switch in pixel format from input stream
+================================================================================
 Release version: 5.1.1_RC2
 Date: 2024-12-11            SW version: 5.1.1_RC2           FW version: 5.1.1_RC1
 Compat FW API ver: 6rt      Libxcoder API ver: 2.68

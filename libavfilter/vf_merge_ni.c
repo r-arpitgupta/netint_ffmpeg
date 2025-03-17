@@ -136,6 +136,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
     frame_0_surface = ((niFrameSurface1_t*)(frame->buf[0]->data));
     frame_1_surface = ((niFrameSurface1_t*)(frame->buf[1]->data));
     if (s->src_ctx.h[0] == s->src_ctx.h[1] && s->src_ctx.w[0] == s->src_ctx.w[1]) {
+        av_buffer_unref(&frame->buf[1]);
         return ff_filter_frame(ctx->outputs[0], frame);
     }
 
@@ -180,6 +181,17 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
         }
 
         s->session_opened = 1;
+#if ((LIBXCODER_API_VERSION_MAJOR > 2) ||                                        \
+      (LIBXCODER_API_VERSION_MAJOR == 2 && LIBXCODER_API_VERSION_MINOR>= 76))
+        if (s->params.scaler_param_b != 0 || s->params.scaler_param_c != 0.75)
+        {
+            s->params.enable_scaler_params = true;
+        }
+        else
+        {
+            s->params.enable_scaler_params = false;
+        }
+#endif
         if (s->params.filterblit) {
             retcode = ni_scaler_set_params(&s->api_ctx, &(s->params));
             if (retcode < 0)
@@ -197,9 +209,11 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
             goto fail;
         }
 
-        ff_ni_clone_hwframe_ctx(frame_ctx,
-                                (AVHWFramesContext *)s->out_frames_ref->data,
-                                &s->api_ctx);
+        AVHWFramesContext *out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
+        AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+        ni_cpy_hwframe_ctx(frame_ctx, out_frames_ctx);
+        ni_device_session_copy(&s->api_ctx, &out_ni_ctx->api_ctx);
+        ((AVNIFramesContext *) out_frames_ctx->hwctx)->split_ctx.enabled = 0;
 
         if (frame && frame->color_range == AVCOL_RANGE_JPEG) {
             av_log(ctx, AV_LOG_WARNING,
@@ -351,8 +365,7 @@ static int activate(AVFilterContext *ctx)
     AVFilterLink  *inlink = ctx->inputs[0];
     AVFilterLink  *outlink = ctx->outputs[0];
     AVFrame *frame = NULL;
-    int ret = 0;
-    NetIntMergeContext *s = inlink->dst->priv;
+    int ret;
 
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
@@ -362,21 +375,9 @@ static int activate(AVFilterContext *ctx)
 
     if (ff_inlink_check_available_frame(inlink))
     {
-        if (s->initialized)
-        {
-            ret = ni_device_session_query_buffer_avail(&s->api_ctx, NI_DEVICE_TYPE_SCALER);
-        }
-
-        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
-        {
-            av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
-        }
-        else if (ret < 0)
-        {
-            av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %u available_frame %d outlink framequeue %u frame_wanted %d - return NOT READY\n",
-                __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
+        // Consume from inlink framequeue only when outlink framequeue is empty, to prevent filter from exhausting all pre-allocated device buffers
+        if (ff_inlink_check_available_frame(outlink))
             return FFERROR_NOT_READY;
-        }
 
         ret = ff_inlink_consume_frame(inlink, &frame);
         if (ret < 0)
@@ -403,7 +404,7 @@ static int config_input_0(AVFilterLink *inlink, AVFrame *in)
 {
     NetIntMergeContext *s = inlink->dst->priv;
     AVHWFramesContext *in_frames_ctx;
-    NIFramesContext *src_ctx;
+    AVNIFramesContext *src_ctx;
     ni_split_context_t *p_split_ctx_src;
 
 #if IS_FFMPEG_71_AND_ABOVE
@@ -426,7 +427,7 @@ static int config_input_0(AVFilterLink *inlink, AVFrame *in)
         return AVERROR(EINVAL);
     }
 
-    src_ctx  = in_frames_ctx->internal->priv;
+    src_ctx = (AVNIFramesContext*) in_frames_ctx->hwctx;
     p_split_ctx_src = &src_ctx->split_ctx;
     if(!p_split_ctx_src->enabled)
     {
@@ -537,6 +538,11 @@ static const AVOption merge_options[] = {
         FLAGS,
         "keep_alive_timeout"},
     { "filterblit", "filterblit enable", OFFSET(params.filterblit), AV_OPT_TYPE_INT, {.i64=0}, 0, 2, FLAGS },
+#if ((LIBXCODER_API_VERSION_MAJOR > 2) ||                                        \
+      (LIBXCODER_API_VERSION_MAJOR == 2 && LIBXCODER_API_VERSION_MINOR>= 76))
+    { "param_b", "Parameter B for bicubic", OFFSET(params.scaler_param_b), AV_OPT_TYPE_DOUBLE, {.dbl=-1}, INT_MIN, INT_MAX, FLAGS },
+    { "param_c", "Parameter C for bicubic", OFFSET(params.scaler_param_c), AV_OPT_TYPE_DOUBLE, {.dbl=-1}, INT_MIN, INT_MAX, FLAGS },
+#endif
     {"buffer_limit",
      "Whether to limit output buffering count, 0: no, 1: yes",
      OFFSET(buffer_limit),

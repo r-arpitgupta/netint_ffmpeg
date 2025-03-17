@@ -121,9 +121,6 @@ static void cleanup_ai_context(AVFilterContext *ctx, NetIntAiPreprocessContext *
 
     if (ai_ctx) {
         ni_frame_buffer_free(&ai_ctx->api_src_frame.data.frame);
-        ni_frame_buffer_free(&ai_ctx->api_dst_frame.data.frame);
-        ni_packet_buffer_free(&ai_ctx->api_dst_frame.data.packet);
-        //ni_packet_buffer_free(&ai_ctx->api_dst_pkt.data.packet);
 
         retval =
             ni_device_session_close(&ai_ctx->api_ctx, 1, NI_DEVICE_TYPE_AI);
@@ -149,9 +146,12 @@ static void cleanup_ai_context(AVFilterContext *ctx, NetIntAiPreprocessContext *
                 ni_device_close(ai_ctx->api_ctx.blk_io_handle);
             }
 #endif
+            ni_packet_buffer_free(&ai_ctx->api_dst_frame.data.packet);
             ai_ctx->api_ctx.device_handle = NI_INVALID_DEVICE_HANDLE;
             ai_ctx->api_ctx.blk_io_handle = NI_INVALID_DEVICE_HANDLE;
-        }      
+        } else {
+            ni_frame_buffer_free(&ai_ctx->api_dst_frame.data.frame);
+	}	
         ni_device_session_context_clear(&ai_ctx->api_ctx);
         av_free(ai_ctx);
         s->ai_ctx = NULL;
@@ -190,7 +190,7 @@ static int init_ai_context(AVFilterContext *ctx, NetIntAiPreprocessContext *s,
     AVHWFramesContext *pAVHFWCtx;
     AVNIDeviceContext *pAVNIDevCtx;
     AVHWFramesContext *out_frames_ctx;
-    NIFramesContext *ni_ctx;
+    AVNIFramesContext *f_hwctx;
     int cardno;
     if (hwframe)
     {
@@ -232,8 +232,8 @@ static int init_ai_context(AVFilterContext *ctx, NetIntAiPreprocessContext *s,
         return 0;
     }
    out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
-   ni_ctx = out_frames_ctx->internal->priv;
-   ni_ctx->api_ctx.session_timestamp = ai_ctx->api_ctx.session_timestamp;
+   f_hwctx = (AVNIFramesContext*) out_frames_ctx->hwctx;
+   f_hwctx->api_ctx.session_timestamp = ai_ctx->api_ctx.session_timestamp;
 
    // Create frame pool
    int format = ff_ni_ffmpeg_to_gc620_pix_fmt(pAVHFWCtx->sw_format);
@@ -928,7 +928,10 @@ static int ni_ai_pre_filter_frame(AVFilterLink *link, AVFrame *in) {
         if (hwframe)
         {
             av_hwframe_ctx_init(s->out_frames_ref);
-            ff_ni_clone_hwframe_ctx(pAVHFWCtx, (AVHWFramesContext *)s->out_frames_ref->data, &s->ai_ctx->api_ctx);
+            AVHWFramesContext *out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
+            AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+            ni_cpy_hwframe_ctx(pAVHFWCtx, out_frames_ctx);
+            ni_device_session_copy(&s->ai_ctx->api_ctx, &out_ni_ctx->api_ctx);
         }
     }
 
@@ -1011,12 +1014,24 @@ static int ni_ai_pre_filter_frame(AVFilterLink *link, AVFrame *in) {
                 retval = ni_device_clone_hwframe(&ai_ctx->api_ctx, &frame_clone_desc);
                 if (retval != NI_RETCODE_SUCCESS) {
                     av_log(ctx, AV_LOG_ERROR, "failed to clone hw input frame\n");
+                    retval = ni_hwframe_buffer_recycle(&dst_surface, dst_surface.device_handle);
+                    if (retval != NI_RETCODE_SUCCESS)
+                    {
+                        av_log(NULL, AV_LOG_ERROR, "ERROR Failed to recycle trace ui16FrameIdx = [%d] DevHandle %d\n",
+                                dst_surface.ui16FrameIdx, dst_surface.device_handle);
+                    }
                     ret = AVERROR(ENOMEM);
                     goto failed_out;
                 }
             } else {
                 av_log(ctx, AV_LOG_ERROR, "Error: support yuv420p only, current fmt %d\n",
                     in_frames_context->sw_format);
+                retval = ni_hwframe_buffer_recycle(&dst_surface, dst_surface.device_handle);
+                if (retval != NI_RETCODE_SUCCESS)
+                {
+                    av_log(NULL, AV_LOG_ERROR, "ERROR Failed to recycle trace ui16FrameIdx = [%d] DevHandle %d\n",
+                            dst_surface.ui16FrameIdx, dst_surface.device_handle);
+                }
                 ret = AVERROR(EINVAL);
                 goto failed_out;
             }

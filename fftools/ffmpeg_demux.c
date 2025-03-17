@@ -1115,15 +1115,12 @@ static int choose_decoder(const OptionsContext *o, void *logctx,
         if (o->force_nidec && st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             // NETINT: find NI HW decoder based on the codec id.
             // exit if the parameter is unsupported or could not find a decoder.
-            if (!av_strcasecmp(o->force_nidec, "logan")) {
-                hwaccel_id = HWACCEL_GENERIC;
-                hwaccel_device_type = AV_HWDEVICE_TYPE_NI_LOGAN;
-            } else if (!av_strcasecmp(o->force_nidec, "quadra")) {
+            if (!av_strcasecmp(o->force_nidec, "quadra")) {
                 hwaccel_id = HWACCEL_GENERIC;
                 hwaccel_device_type = AV_HWDEVICE_TYPE_NI_QUADRA;
             } else {
                 av_log(NULL, AV_LOG_FATAL, "Unsupported parameter force_nidec value (%s), "
-                       "supported value is logan or quadra\n", o->force_nidec);
+                       "supported value is quadra\n", o->force_nidec);
                 return AVERROR_EXIT;
             }
         }

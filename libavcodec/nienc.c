@@ -35,7 +35,6 @@
 #include "libavutil/avstring.h"
 #include "libavutil/hdr_dynamic_metadata.h"
 #include "libavutil/hwcontext.h"
-#include "libavutil/hwcontext_internal.h"
 #include "libavutil/hwcontext_ni_quad.h"
 #include "libavutil/mastering_display_metadata.h"
 #include "ni_av_codec.h"
@@ -382,13 +381,21 @@ static int xcoder_setup_encoder(AVCodecContext *avctx)
   if (SESSION_RUN_STATE_SEQ_CHANGE_DRAINING != s->api_ctx.session_run_state)
   {
       av_log(avctx, AV_LOG_INFO, "Session state: %d allocate frame fifo.\n",
-          s->api_ctx.session_run_state);
+             s->api_ctx.session_run_state);
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+      s->fme_fifo = av_fifo_alloc2((size_t) 1, sizeof(AVFrame), 0);
+#else
       s->fme_fifo = av_fifo_alloc(sizeof(AVFrame));
+#endif
   }
   else
   {
       av_log(avctx, AV_LOG_INFO, "Session seq change, fifo size: %lu.\n",
-          av_fifo_size(s->fme_fifo) / sizeof(AVFrame));
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+             av_fifo_can_read(s->fme_fifo));
+#else
+             av_fifo_size(s->fme_fifo) / sizeof(AVFrame));
+#endif
   }
 
   if (!s->fme_fifo)
@@ -911,7 +918,10 @@ static int xcoder_setup_encoder(AVCodecContext *avctx)
   }
 
   // generate encoded bitstream headers in advance if configured to do so
-  if ((pparams->generate_enc_hdrs) && (avctx->codec_id != AV_CODEC_ID_MJPEG)) {
+  if ((avctx->codec_id != AV_CODEC_ID_MJPEG) &&
+      (pparams->generate_enc_hdrs || s->gen_global_headers || // pparams->generate_enc_hdrs will be deprecated in v5.3.0
+       ((avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER) &&
+        (s->gen_global_headers == GEN_GLOBAL_HEADERS_AUTO)))) {
       ret = xcoder_encoder_headers(avctx);
   }
 
@@ -1084,13 +1094,21 @@ int xcoder_encode_close(AVCodecContext *avctx)
       ctx->api_pkt.data.packet.av1_buffer_index)
       ni_packet_buffer_free_av1(&(ctx->api_pkt.data.packet));
 
-  av_log(avctx, AV_LOG_DEBUG, "fifo size: %lu\n",
+  av_log(avctx, AV_LOG_DEBUG, "fifo num frames: %lu\n",
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+         av_fifo_can_read(ctx->fme_fifo));
+#else
          av_fifo_size(ctx->fme_fifo) / sizeof(AVFrame));
+#endif
   if (ctx->api_ctx.session_run_state != SESSION_RUN_STATE_SEQ_CHANGE_DRAINING)
   {
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+    av_fifo_freep2(&ctx->fme_fifo);
+#else
     if (ctx->fme_fifo)
-      av_fifo_free(ctx->fme_fifo);
+        av_fifo_free(ctx->fme_fifo);
     ctx->fme_fifo = NULL;
+#endif
     av_log(avctx, AV_LOG_DEBUG, " , freed.\n");
   }
   else
@@ -1222,36 +1240,64 @@ static int is_input_fifo_empty(XCoderH265EncContext *s)
   {
     return 1;
   }
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+  return av_fifo_can_read(s->fme_fifo) ? 0 : 1;
+#else
   return av_fifo_size(s->fme_fifo) < sizeof(AVFrame);
+#endif
 }
 
 static int enqueue_frame(AVCodecContext *avctx, const AVFrame *inframe)
 {
   XCoderH265EncContext *ctx = avctx->priv_data;
+  size_t nb_elems;
   int ret = 0;
 
   // expand frame buffer fifo if not enough space
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+  if (!av_fifo_can_write(ctx->fme_fifo))
+#else
   if (av_fifo_space(ctx->fme_fifo) < sizeof(AVFrame))
+#endif
   {
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+    if (av_fifo_can_read(ctx->fme_fifo) >= NI_MAX_FIFO_CAPACITY)
+    {
+      av_log(avctx, AV_LOG_ERROR, "Encoder frame buffer fifo capacity (%lu) reached maximum (%d)\n",
+             av_fifo_can_read(ctx->fme_fifo), NI_MAX_FIFO_CAPACITY);
+      return AVERROR_EXTERNAL;
+#else
     if (av_fifo_size(ctx->fme_fifo) / sizeof(AVFrame) >= NI_MAX_FIFO_CAPACITY)
     {
-      av_log(avctx, AV_LOG_ERROR, "Encoder frame buffer fifo capacity (%lu) reaches the maxmum %d\n",
+      av_log(avctx, AV_LOG_ERROR, "Encoder frame buffer fifo capacity (%lu) reached maximum (%d)\n",
              av_fifo_size(ctx->fme_fifo) / sizeof(AVFrame), NI_MAX_FIFO_CAPACITY);
       return AVERROR_EXTERNAL;
+#endif
     }
-    ret = av_fifo_realloc2(ctx->fme_fifo,
-                           av_fifo_size(ctx->fme_fifo) + sizeof(AVFrame));
+
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+    ret = av_fifo_grow2(ctx->fme_fifo, (size_t) 1);
+#else
+    ret = av_fifo_grow(ctx->fme_fifo, sizeof(AVFrame));
+#endif
     if (ret < 0)
     {
-      av_log(avctx, AV_LOG_ERROR, "Enc av_fifo_realloc2 NO MEMORY !!!\n");
+      av_log(avctx, AV_LOG_ERROR, "Cannot grow FIFO: out of memory\n");
       return ret;
     }
-    if (((av_fifo_size(ctx->fme_fifo)+av_fifo_space(ctx->fme_fifo))  / sizeof(AVFrame) % 100) == 0)
+
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+    nb_elems = av_fifo_can_read(ctx->fme_fifo) + av_fifo_can_write(ctx->fme_fifo);
+#else
+    nb_elems = (av_fifo_size(ctx->fme_fifo) + av_fifo_space(ctx->fme_fifo)) / sizeof(AVFrame);
+#endif
+    if ((nb_elems % 100) == 0)
     {
-      av_log(avctx, AV_LOG_INFO, "Enc fifo being extended to: %lu\n",
-             (av_fifo_size(ctx->fme_fifo)+av_fifo_space(ctx->fme_fifo)) / sizeof(AVFrame));
+      av_log(avctx, AV_LOG_INFO, "Enc fifo being extended to: %lu\n", nb_elems);
     }
-    av_assert0(0 == (av_fifo_size(ctx->fme_fifo)+av_fifo_space(ctx->fme_fifo)) % sizeof(AVFrame));
+#if (LIBAVUTIL_VERSION_MAJOR < 59)
+    av_assert0(0 == (av_fifo_size(ctx->fme_fifo) + av_fifo_space(ctx->fme_fifo)) % sizeof(AVFrame));
+#endif
   }
 
   if (inframe == &ctx->buffered_fme)
@@ -1260,7 +1306,11 @@ static int enqueue_frame(AVCodecContext *avctx, const AVFrame *inframe)
     // ff_alloc_get_frame rather than passed as function argument. So we need to
     // judge whether they are the same object. If they are the same NO need to do
     // any reference before queue operation.
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+    av_fifo_write(ctx->fme_fifo, (void *)inframe, (size_t) 1);
+#else
     av_fifo_generic_write(ctx->fme_fifo, (void *)inframe, sizeof(*inframe), NULL);
+#endif
   }
   else
   {
@@ -1268,12 +1318,19 @@ static int enqueue_frame(AVCodecContext *avctx, const AVFrame *inframe)
     memset(&temp_frame, 0, sizeof(AVFrame));
     // In case double free for external input frame and our buffered frame.
     av_frame_ref(&temp_frame, inframe);
-    av_fifo_generic_write(ctx->fme_fifo, &temp_frame, sizeof(*inframe), NULL);
+    #if (LIBAVUTIL_VERSION_MAJOR >= 59)
+        av_fifo_write(ctx->fme_fifo, &temp_frame, 1);
+    #else
+        av_fifo_generic_write(ctx->fme_fifo, &temp_frame, sizeof(*inframe), NULL);
+    #endif
   }
 
-  av_log(avctx, AV_LOG_DEBUG, "fme queued, fifo size: %lu\n",
+  av_log(avctx, AV_LOG_DEBUG, "fme queued, fifo num frames: %lu\n",
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+         av_fifo_can_read(ctx->fme_fifo));
+#else
          av_fifo_size(ctx->fme_fifo) / sizeof(AVFrame));
-
+#endif
   return ret;
 }
 
@@ -1292,10 +1349,9 @@ int xcoder_send_frame(AVCodecContext *avctx, const AVFrame *frame)
   ni_xcoder_params_t *p_param;
   int need_to_copy = 1;
   AVHWFramesContext *avhwf_ctx;
-  NIFramesContext *nif_src_ctx;
+  AVNIFramesContext *nif_src_ctx;
   AVFrameSideData *side_data;
   AVNetintGeneralSideData *ni_side_data;
-  int data_size;
   const AVFrame *first_frame = NULL;
   // employ a ni_frame_t as a data holder to convert/prepare for side data
   // of the passed in frame
@@ -1343,9 +1399,15 @@ int xcoder_send_frame(AVCodecContext *avctx, const AVFrame *frame)
           {
             if (! is_input_fifo_empty(ctx))
             {
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+              av_fifo_drain2(ctx->fme_fifo, (size_t) 1);
+              av_log(avctx, AV_LOG_DEBUG, "fme popped, fifo num frames: %lu\n",
+                     av_fifo_can_read(ctx->fme_fifo));
+#else
               av_fifo_drain(ctx->fme_fifo, sizeof(AVFrame));
-              av_log(avctx, AV_LOG_DEBUG, "fme popped, fifo size: %lu\n",
+              av_log(avctx, AV_LOG_DEBUG, "fme popped, fifo num frames: %lu\n",
                      av_fifo_size(ctx->fme_fifo) / sizeof(AVFrame));
+#endif
             }
             av_frame_unref(&ctx->buffered_fme);
           }
@@ -1374,9 +1436,13 @@ int xcoder_send_frame(AVCodecContext *avctx, const AVFrame *frame)
   {
     if (!is_input_fifo_empty(ctx))
     {
-      av_log(avctx, AV_LOG_VERBOSE, "first frame: use fme from av_fifo_generic_peek\n");
-      av_fifo_generic_peek(ctx->fme_fifo, &ctx->buffered_fme,
-                           sizeof(AVFrame), NULL);
+      av_log(avctx, AV_LOG_VERBOSE, "first frame: use fme from fifo peek\n");
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+      av_fifo_peek(ctx->fme_fifo, &ctx->buffered_fme, (size_t) 1, NULL);
+#else
+      av_fifo_generic_peek(ctx->fme_fifo, &ctx->buffered_fme, sizeof(AVFrame),
+                           NULL);
+#endif
       ctx->buffered_fme.extended_data = ctx->buffered_fme.data;
       first_frame = &ctx->buffered_fme;
 
@@ -1395,9 +1461,13 @@ int xcoder_send_frame(AVCodecContext *avctx, const AVFrame *frame)
   {
     if (!is_input_fifo_empty(ctx))
     {
-      av_log(avctx, AV_LOG_VERBOSE, "first frame: use fme from av_fifo_generic_peek\n");
-      av_fifo_generic_peek(ctx->fme_fifo, &ctx->buffered_fme,
-                           sizeof(AVFrame), NULL);
+      av_log(avctx, AV_LOG_VERBOSE, "first frame: use fme from fifo peek\n");
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+      av_fifo_peek(ctx->fme_fifo, &ctx->buffered_fme, (size_t) 1, NULL);
+#else
+      av_fifo_generic_peek(ctx->fme_fifo, &ctx->buffered_fme, sizeof(AVFrame),
+                           NULL);
+#endif
       ctx->buffered_fme.extended_data = ctx->buffered_fme.data;
       first_frame = &ctx->buffered_fme;
     }
@@ -1632,9 +1702,15 @@ int xcoder_send_frame(AVCodecContext *avctx, const AVFrame *frame)
         {
           if (! is_input_fifo_empty(ctx))
           {
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+            av_fifo_drain2(ctx->fme_fifo, (size_t) 1);
+            av_log(avctx, AV_LOG_DEBUG, "fme popped, fifo num frames: %lu\n",
+                   av_fifo_can_read(ctx->fme_fifo));
+#else
             av_fifo_drain(ctx->fme_fifo, sizeof(AVFrame));
-            av_log(avctx, AV_LOG_DEBUG, "fme popped, fifo size: %lu\n",
+            av_log(avctx, AV_LOG_DEBUG, "fme popped, fifo num frames: %lu\n",
                    av_fifo_size(ctx->fme_fifo) / sizeof(AVFrame));
+#endif
           }
         }
         ret = AVERROR_EXTERNAL;
@@ -1736,9 +1812,13 @@ resend:
                    "no frame in fifo to send, send eos ..\n");
         }
     } else {
-        av_log(avctx, AV_LOG_DEBUG, "av_fifo_generic_peek fme\n");
+        av_log(avctx, AV_LOG_DEBUG, "fifo peek fme\n");
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+        av_fifo_peek(ctx->fme_fifo, &ctx->buffered_fme, (size_t) 1, NULL);
+#else
         av_fifo_generic_peek(ctx->fme_fifo, &ctx->buffered_fme, sizeof(AVFrame),
                              NULL);
+#endif
         ctx->buffered_fme.extended_data = ctx->buffered_fme.data;
     }
 
@@ -1933,28 +2013,12 @@ resend:
         ni_side_data = (AVNetintGeneralSideData *)(side_data->data);
         for (i = 0; i < ni_side_data->count && i < NI_GENERAL_SIDEDATA_MAX_COUNT; i++)
         {
-            switch (ni_side_data->type[i])
+            if (ni_side_data->size[i])
             {
-            case NI_FRAME_AUX_DATA_CRF:
-            case NI_FRAME_AUX_DATA_VBV_MAX_RATE:
-            case NI_FRAME_AUX_DATA_VBV_BUFFER_SIZE:
-                data_size = sizeof(int32_t);
-                break;
-            case NI_FRAME_AUX_DATA_CRF_FLOAT:
-                data_size = sizeof(float);
-                break;
-            default:
-                data_size = 0;
-                av_log(avctx, AV_LOG_ERROR, "unsupport side data type %d\n", 
-                       ni_side_data->type[i]);
-                break;
-            }
-            if (data_size)
-            {
-                aux_data = ni_frame_new_aux_data(&dec_frame, ni_side_data->type[i], data_size);
+                aux_data = ni_frame_new_aux_data(&dec_frame, ni_side_data->type[i], ni_side_data->size[i]);
                 if (aux_data)
                 {
-                    memcpy(aux_data->data, ni_side_data->data[i], data_size);
+                    memcpy(aux_data->data, ni_side_data->data[i], ni_side_data->size[i]);
                 }
             }
         }
@@ -1977,8 +2041,15 @@ resend:
           //   or at the start the transcoding
           if (ctx->api_ctx.passed_time_in_timebase_unit >= (avctx->time_base.den / avctx->time_base.num))
           {
+            //this is a workaround for small resolution vfr mode
+            //when detect framerate change, the reconfig framerate will trigger bitrate params to reset
+            //the cost related to bitrate estimate is all tuned with downsample flow
+            //but for small resolution, the lookahead won't downsample
+            int slow_down_vfr = 0;
             cur_fps = ctx->api_ctx.count_frame_num_in_sec;
-            if ((ctx->api_ctx.frame_num != 0) && (pre_fps != cur_fps) &&
+            if (ctx->buffered_fme.width < 288 || ctx->buffered_fme.height < 256)
+              slow_down_vfr = 1;
+            if ((ctx->api_ctx.frame_num != 0) && (pre_fps != cur_fps) && (slow_down_vfr ? (abs(cur_fps - pre_fps) > 2) : 1) &&
                 ((ctx->api_ctx.frame_num < ctx->api_param.cfg_enc_params.frame_rate) ||
                  (ctx->api_ctx.frame_num - ctx->api_ctx.last_change_framenum >= ctx->api_param.cfg_enc_params.frame_rate)))
             {
@@ -2595,7 +2666,7 @@ resend:
                  ctx->api_ctx.auto_dl_handle, avctx->width, avctx->height);
           avhwf_ctx =
               (AVHWFramesContext *)ctx->buffered_fme.hw_frames_ctx->data;
-          nif_src_ctx = avhwf_ctx->internal->priv;
+          nif_src_ctx = (AVNIFramesContext*) avhwf_ctx->hwctx;
 
           src_surf = (niFrameSurface1_t *)ctx->buffered_fme.data[3];
 
@@ -2944,9 +3015,15 @@ resend:
       {
         if (! is_input_fifo_empty(ctx))
         {
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+          av_fifo_drain2(ctx->fme_fifo, (size_t) 1);
+          av_log(avctx, AV_LOG_DEBUG, "fme popped, fifo num frames: %lu\n",
+                 av_fifo_can_read(ctx->fme_fifo));
+#else
           av_fifo_drain(ctx->fme_fifo, sizeof(AVFrame));
-          av_log(avctx, AV_LOG_DEBUG, "fme popped, fifo size: %lu\n",
+          av_log(avctx, AV_LOG_DEBUG, "fme popped, fifo num frames: %lu\n",
                  av_fifo_size(ctx->fme_fifo) / sizeof(AVFrame));
+#endif
         }
         av_frame_unref(&ctx->buffered_fme);
         ishwframe = (ctx->buffered_fme.format == AV_PIX_FMT_NI_QUAD) &&
@@ -2994,9 +3071,12 @@ resend:
   if (ret == 0 && frame && !is_input_fifo_empty(ctx) &&
       SESSION_RUN_STATE_SEQ_CHANGE_DRAINING != ctx->api_ctx.session_run_state)
   {
-    av_log(avctx, AV_LOG_DEBUG,
-            "try to flush encoder input fifo fifo size: %lu\n",
-            av_fifo_size(ctx->fme_fifo) / sizeof(AVFrame));
+    av_log(avctx, AV_LOG_DEBUG, "try to flush encoder input fifo. Fifo num frames: %lu\n",
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+           av_fifo_can_read(ctx->fme_fifo));
+#else
+           av_fifo_size(ctx->fme_fifo) / sizeof(AVFrame));
+#endif
     goto resend;
   }
 
@@ -3031,7 +3111,11 @@ static int xcoder_encode_reinit(AVCodecContext *avctx)
 
   // re-init avctx's resolution to the changed one that is
   // stored in the first frame of the fifo
-  av_fifo_generic_peek(ctx->fme_fifo, &temp_frame , sizeof(AVFrame), NULL);
+#if (LIBAVUTIL_VERSION_MAJOR >= 59)
+  av_fifo_peek(ctx->fme_fifo, &temp_frame, (size_t) 1, NULL);
+#else
+  av_fifo_generic_peek(ctx->fme_fifo, &temp_frame, sizeof(AVFrame), NULL);
+#endif
   temp_frame.extended_data = temp_frame.data;
 
   ishwframe = temp_frame.format == AV_PIX_FMT_NI_QUAD;
@@ -3400,12 +3484,29 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
                  xpkt->recycle_index);
           if (avframe_index >= 0 && ctx->sframe_pool[avframe_index]) {
               frame = ctx->sframe_pool[avframe_index];
-              ((niFrameSurface1_t *)((uint8_t *)frame->data[3]))
-                  ->device_handle =
+              niFrameSurface1_t *ni_frame = (niFrameSurface1_t *)((uint8_t *)frame->data[3]);
+              ni_device_handle_t device_handle = (ni_device_handle_t)ni_frame->device_handle;
+
+              ni_frame->device_handle =
                   (int32_t)((int64_t)(ctx->api_ctx.blk_io_handle) &
                             0xFFFFFFFF); // update handle to most recent alive
 
               av_frame_unref(ctx->sframe_pool[avframe_index]);
+
+              // restore the original handler if (ref_cnt - 1) > 0
+	      if (frame->buf[0])
+	      {
+                  int ref_cnt = av_buffer_get_ref_count(frame->buf[0]);
+	          if (ref_cnt > 0)
+                  {
+                      ni_frame->device_handle =
+                          (int32_t)((int64_t)(device_handle) & 0xFFFFFFFF);
+                      av_log(avctx, AV_LOG_DEBUG,
+                           "restore the original handler 0x%x\n",
+                           device_handle);
+                  }
+	      }
+
               av_log(avctx, AV_LOG_DEBUG,
                      "AVframe_index = %d pushed to free tail %d\n",
                      avframe_index, ctx->freeTail);
@@ -3483,13 +3584,16 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
             continue;
       }
 
-      // handle av1
+      // store av1 packets to be merged & sent along with future packet      
+      int temp_index;
+      uint32_t data_len = 0;      
       if (avctx->codec_id == AV_CODEC_ID_AV1) {
           av_log(
               avctx, AV_LOG_TRACE,
               "xcoder_receive_packet: AV1 xpkt buf %p size %d show_frame %d\n",
-              xpkt->p_data, xpkt->data_len, xpkt->av1_show_frame);
-          if (!xpkt->av1_show_frame && (ctx->total_frames_received >= 1)) {
+              xpkt->p_data, xpkt->data_len, xpkt->av1_show_frame);         
+          if (!xpkt->av1_show_frame) {
+              // store AV1 packets
               xpkt->av1_p_buffer[xpkt->av1_buffer_index]    = xpkt->p_buffer;
               xpkt->av1_p_data[xpkt->av1_buffer_index]      = xpkt->p_data;
               xpkt->av1_buffer_size[xpkt->av1_buffer_index] = xpkt->buffer_size;
@@ -3527,6 +3631,15 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
                   continue;
               }
           }
+          else
+          {
+             // calculate length of previously received AV1 packets pending for merge
+              av1_output_frame = 1;
+              for (temp_index = 0; temp_index < xpkt->av1_buffer_index;
+                   temp_index++) {
+                  data_len += xpkt->av1_data_len[temp_index] - meta_size;
+              }
+          }          
       }
 
       uint32_t nalu_type = 0;
@@ -3594,7 +3707,7 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
       }
 
       if (! ctx->firstPktArrived)
-      {
+      {      
         int sizeof_spspps_attached_to_idr = ctx->spsPpsHdrLen;
         if ((avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER) &&
             (avctx->codec_id != AV_CODEC_ID_AV1) &&
@@ -3605,12 +3718,17 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
         if (ctx->first_frame_pts == INT_MIN)
             ctx->first_frame_pts = xpkt->pts;
 
+        data_len += xpkt->data_len - meta_size + sizeof_spspps_attached_to_idr + total_custom_sei_size;
+          if (avctx->codec_id == AV_CODEC_ID_AV1)
+              av_log(avctx, AV_LOG_TRACE, "xcoder_receive_packet: AV1 first output pkt size %d\n", data_len);
+          
 #if (LIBAVCODEC_VERSION_MAJOR >= 59)
-        ret = ff_get_encode_buffer(avctx, pkt, xpkt->data_len - meta_size + sizeof_spspps_attached_to_idr + total_custom_sei_size, 0);
+        ret = ff_get_encode_buffer(avctx, pkt, data_len, 0);
 #else
-        ret = ff_alloc_packet2(avctx, pkt, xpkt->data_len - meta_size + sizeof_spspps_attached_to_idr + total_custom_sei_size,
-                               xpkt->data_len - meta_size + sizeof_spspps_attached_to_idr + total_custom_sei_size);
+        ret = ff_alloc_packet2(avctx, pkt, data_len,
+                               data_len);
 #endif
+
         if (! ret)
         {
           uint8_t *p_dst, *p_side_data;
@@ -3647,7 +3765,7 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
               p_dst += ctx->spsPpsHdrLen;
           }
 
-          if (custom_sei_count)
+          if (custom_sei_count && avctx->codec_id != AV_CODEC_ID_AV1)
           {
               // copy buf_period
               memcpy(p_dst, p_src, copy_len);
@@ -3664,7 +3782,7 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
                   memcpy(p_dst, &p_custom_sei->data[0], p_custom_sei->size);
                   p_dst += p_custom_sei->size;
               }
-
+              
               // copy the IDR data
               memcpy(p_dst, p_src + copy_len,
                      xpkt->data_len - meta_size - copy_len);
@@ -3677,35 +3795,8 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
                   memcpy(p_dst, &p_custom_sei->data[0], p_custom_sei->size);
                   p_dst += p_custom_sei->size;
               }
-          }
-          else
-          {
-              memcpy(p_dst, (uint8_t*)xpkt->p_data + meta_size,
-                     xpkt->data_len - meta_size);
-          }
-        }
-      }
-      else
-      {
-          int temp_index;
-          uint32_t data_len = xpkt->data_len - meta_size + total_custom_sei_size;
-          if (avctx->codec_id == AV_CODEC_ID_AV1) {
-              av1_output_frame = 1;
-              for (temp_index = 0; temp_index < xpkt->av1_buffer_index;
-                   temp_index++) {
-                  data_len += xpkt->av1_data_len[temp_index] - meta_size;
-              }
-          }
-          // av_log(avctx, AV_LOG_TRACE, "xcoder_receive_packet: AV1 total pkt
-          // size %d\n", data_len);
-
-#if (LIBAVCODEC_VERSION_MAJOR >= 59)
-          ret = ff_get_encode_buffer(avctx, pkt, data_len, 0);
-#else
-          ret = ff_alloc_packet2(avctx, pkt, data_len, data_len);
-#endif
-          if (!ret) {
-              uint8_t *p_dst = pkt->data;
+          } else {
+              // merge AV1 packets
               if (avctx->codec_id == AV_CODEC_ID_AV1) {
                   for (temp_index = 0; temp_index < xpkt->av1_buffer_index;
                        temp_index++) {
@@ -3720,8 +3811,28 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
                       p_dst += (xpkt->av1_data_len[temp_index] - meta_size);
                   }
               }
+          
+              memcpy(p_dst, (uint8_t*)xpkt->p_data + meta_size,
+                     xpkt->data_len - meta_size);
+          }
+        }
+      }
+      else
+      {
+          data_len += xpkt->data_len - meta_size + total_custom_sei_size;
+          if (avctx->codec_id == AV_CODEC_ID_AV1)
+              av_log(avctx, AV_LOG_TRACE, "xcoder_receive_packet: AV1 output pkt size %d\n", data_len);
 
-              if (custom_sei_count)
+#if (LIBAVCODEC_VERSION_MAJOR >= 59)
+          ret = ff_get_encode_buffer(avctx, pkt, data_len, 0);
+#else
+          ret = ff_alloc_packet2(avctx, pkt, data_len, data_len);
+#endif
+
+          if (!ret) {
+              uint8_t *p_dst = pkt->data;
+
+              if (custom_sei_count && avctx->codec_id != AV_CODEC_ID_AV1)
               {
                   // copy buf_period
                   memcpy(p_dst, p_src, copy_len);
@@ -3739,7 +3850,7 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
                       p_dst += p_custom_sei->size;
                   }
     
-                  // copy the IDR data
+                  // copy the packet data
                   memcpy(p_dst, p_src + copy_len,
                          xpkt->data_len - meta_size - copy_len);
                   p_dst += xpkt->data_len - meta_size - copy_len;
@@ -3752,6 +3863,22 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
                       p_dst += p_custom_sei->size;
                   }
               } else {
+                  // merge AV1 packets
+                  if (avctx->codec_id == AV_CODEC_ID_AV1) {
+                      for (temp_index = 0; temp_index < xpkt->av1_buffer_index;
+                           temp_index++) {
+                          memcpy(p_dst,
+                                 (uint8_t *)xpkt->av1_p_data[temp_index] +
+                                     meta_size,
+                                 xpkt->av1_data_len[temp_index] - meta_size);
+                          // av_log(avctx, AV_LOG_TRACE, "xcoder_receive_packet: AV1
+                          // copy xpkt buf %p size %d\n",
+                          // (uint8_t*)xpkt->av1_p_data[temp_index] + meta_size,
+                          // xpkt->av1_data_len[temp_index] - meta_size);
+                          p_dst += (xpkt->av1_data_len[temp_index] - meta_size);
+                      }
+                  }
+                  
                   memcpy(p_dst, (uint8_t *)xpkt->p_data + meta_size,
                          xpkt->data_len - meta_size);
               }
@@ -3760,11 +3887,11 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
 
 #if ((LIBXCODER_API_VERSION_MAJOR > 2) ||                                        \
       (LIBXCODER_API_VERSION_MAJOR == 2 && LIBXCODER_API_VERSION_MINOR>= 66))
-      if (ctx->api_param.cfg_enc_params.get_psnr_mode != 3 || 
+      if (ctx->api_param.cfg_enc_params.get_psnr_mode < 3 || 
           ctx->api_param.cfg_enc_params.enable_ssim)
       {
         ni_pkt_info pkt_info = {0};
-        if (ctx->api_param.cfg_enc_params.get_psnr_mode != 3)
+        if (ctx->api_param.cfg_enc_params.get_psnr_mode < 3)
         {
           pkt_info.psnr_y = xpkt->psnr_y;
           pkt_info.psnr_u = xpkt->psnr_u;
@@ -3794,7 +3921,7 @@ int xcoder_receive_packet(AVCodecContext *avctx, AVPacket *pkt)
                   pkt_info.ssim_y, pkt_info.ssim_u, pkt_info.ssim_v);
       }
 #else
-      if (ctx->api_param.cfg_enc_params.get_psnr_mode != 3)
+      if (ctx->api_param.cfg_enc_params.get_psnr_mode < 3)
       {
         ni_pkt_info pkt_info;
         pkt_info.psnr_y = ctx->api_ctx.psnr_y;

@@ -2895,7 +2895,6 @@ static int send_frame(FilterGraph *fg, FilterGraphThread *fgt,
         if (ret < 0) {
             switch (ifp->format) {
             case AV_PIX_FMT_NI_QUAD:
-            case AV_PIX_FMT_NI_LOGAN:
                 if (need_reinit && (ret == AVERROR(ENOSYS)))
                     av_log(NULL, AV_LOG_ERROR,
                            "Sequence change is not supported with hw frames + "
@@ -2935,7 +2934,7 @@ static int send_frame(FilterGraph *fg, FilterGraphThread *fgt,
     int reap_filters_now = 0;
     for (int i = 0; i < fg->nb_outputs; i++) {
         OutputFilterPriv *ofp = ofp_from_ofilter(fg->outputs[i]);
-        if (ofp->format == AV_PIX_FMT_NI_QUAD || ofp->format == AV_PIX_FMT_NI_LOGAN) {
+        if (ofp->format == AV_PIX_FMT_NI_QUAD) {
             reap_filters_now = 1;
             break;
         }

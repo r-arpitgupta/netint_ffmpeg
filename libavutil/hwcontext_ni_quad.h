@@ -24,12 +24,12 @@
 #include <ni_rsrc_api.h>
 #include <ni_util.h>
 
-#define IS_FFMPEG_61_AND_ABOVE_FOR_LIBAVUTIL                                                \
-    ((LIBAVUTIL_VERSION_MAJOR > 58) ||                                        \
+#define IS_FFMPEG_61_AND_ABOVE_FOR_LIBAVUTIL                                   \
+    ((LIBAVUTIL_VERSION_MAJOR > 58) ||                                         \
      (LIBAVUTIL_VERSION_MAJOR == 58 && LIBAVUTIL_VERSION_MINOR >= 29))
 
-#define IS_FFMPEG_70_AND_ABOVE_FOR_LIBAVUTIL                                                \
-    ((LIBAVUTIL_VERSION_MAJOR > 59) ||                                        \
+#define IS_FFMPEG_70_AND_ABOVE_FOR_LIBAVUTIL                                   \
+    ((LIBAVUTIL_VERSION_MAJOR > 59) ||                                         \
      (LIBAVUTIL_VERSION_MAJOR == 59 && LIBAVUTIL_VERSION_MINOR >= 8))
 
 enum
@@ -59,18 +59,6 @@ typedef enum _ni_filter_poolsize_code {
     NI_HVSPLUS_ID       = -17,
 } ni_filter_poolsize_code;
 
-typedef struct NIFramesContext {
-  niFrameSurface1_t *surfaces_internal;
-  int                nb_surfaces_used;
-  niFrameSurface1_t **surface_ptrs;
-  ni_session_context_t api_ctx;//for down/uploading frames
-  ni_session_data_io_t src_session_io_data; // for upload frame to be sent up
-  // int pc_height, pc_width, pc_crop_bottom, pc_crop_right; //precropped values
-  ni_split_context_t split_ctx;
-  ni_device_handle_t suspended_device_handle;
-  int                uploader_device_id; //same one passed to libxcoder session open
-} NIFramesContext;
-
 /**
 * This struct is allocated as AVHWDeviceContext.hwctx
 */
@@ -86,17 +74,35 @@ typedef struct AVNIDeviceContext {
 */
 typedef struct AVNIFramesContext {
   niFrameSurface1_t *surfaces;
-  int            nb_surfaces;
-  int            keep_alive_timeout;
-  int            frame_type;
-  AVRational     framerate;                  /* used for modelling hwupload */
-  int            hw_id;
+  int               nb_surfaces;
+  int               keep_alive_timeout;
+  int               frame_type;
+  AVRational        framerate;                  /* used for modelling hwupload */
+  int               hw_id;
+  ni_session_context_t api_ctx; // for down/uploading frames
+  ni_split_context_t   split_ctx;
+  ni_device_handle_t   suspended_device_handle;
+  int                  uploader_device_id; // same one passed to libxcoder session open
+
+  // Accessed only by hwcontext_ni_quad.c
+  niFrameSurface1_t    *surfaces_internal;
+  int                  nb_surfaces_used;
+  niFrameSurface1_t    **surface_ptrs;
+  ni_session_data_io_t src_session_io_data; // for upload frame to be sent up
 } AVNIFramesContext;
 
 static inline int ni_get_cardno(const AVFrame *frame) {
     AVNIFramesContext* ni_hwf_ctx;
     ni_hwf_ctx = (AVNIFramesContext*)((AVHWFramesContext*)frame->hw_frames_ctx->data)->hwctx;
     return ni_hwf_ctx->hw_id;
+}
+
+// copy hwctx specific data from one AVHWFramesContext to another
+// STEVEN TODO: maybe this can be refactored using av_hwframe_ctx_create_derived()?
+static inline void ni_cpy_hwframe_ctx(AVHWFramesContext *in_frames_ctx,
+                                      AVHWFramesContext *out_frames_ctx)
+{
+    memcpy(out_frames_ctx->hwctx, in_frames_ctx->hwctx, sizeof(AVNIFramesContext));
 }
 
 #endif /* AVUTIL_HWCONTEXT_NI_H */

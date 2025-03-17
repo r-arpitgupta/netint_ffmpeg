@@ -40,7 +40,6 @@
 #include "libavutil/eval.h"
 #include "libavutil/hdr_dynamic_metadata.h"
 #include "libavutil/hwcontext.h"
-#include "libavutil/hwcontext_internal.h"
 #include "libavutil/hwcontext_ni_quad.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/intreadwrite.h"
@@ -340,7 +339,7 @@ int ff_xcoder_dec_close(AVCodecContext *avctx, XCoderH264DecContext *s)
                     (AVHWFramesContext *)avctx->hw_frames_ctx->data;
                 if (ctx)
                 {
-                    NIFramesContext *dst_ctx = (ctx->internal) ? ctx->internal->priv : NULL;
+                    AVNIFramesContext *dst_ctx = (AVNIFramesContext*) ctx->hwctx;
                     if (dst_ctx)
                     {
                         dst_ctx->suspended_device_handle = p_ctx->blk_io_handle;
@@ -380,10 +379,7 @@ int ff_xcoder_add_headers(AVCodecContext *avctx, AVPacket *pkt,
 {
     XCoderH264DecContext *s = avctx->priv_data;
     int ret = 0;
-    const uint8_t *ptr      = pkt->data;
-    const uint8_t *end      = pkt->data + pkt->size;
-    uint32_t stc;
-    uint8_t nalu_type;
+    int vps_num, sps_num, pps_num;
 
     // check key frame packet only
     if (!(pkt->flags & AV_PKT_FLAG_KEY) || !pkt->data || !extradata ||
@@ -394,6 +390,13 @@ int ff_xcoder_add_headers(AVCodecContext *avctx, AVPacket *pkt,
     if (s->extradata_size == extradata_size &&
         memcmp(s->extradata, extradata, extradata_size) == 0) {
         av_log(avctx, AV_LOG_TRACE, "%s extradata unchanged.\n", __FUNCTION__);
+        return ret;
+    }
+
+    if (AV_CODEC_ID_H264 != avctx->codec_id &&
+        AV_CODEC_ID_HEVC != avctx->codec_id) {
+        av_log(avctx, AV_LOG_DEBUG, "%s not AVC/HEVC codec: %d, skip!\n",
+              __FUNCTION__, avctx->codec_id);
         return ret;
     }
 
@@ -415,50 +418,58 @@ int ff_xcoder_add_headers(AVCodecContext *avctx, AVPacket *pkt,
     ret = 1;
     // and we've got the first key frame of this stream
     s->got_first_key_frame = 1;
+    vps_num = sps_num = pps_num = 0;
 
-    // then determine if it needs to be prepended to this packet for stream
-    // decoding
-    while (ptr < end) {
-        stc = -1;
-        ptr = avpriv_find_start_code(ptr, end, &stc);
-        if (ptr == end) {
-            break;
-        }
+    if (s->api_param.dec_input_params.skip_extra_headers &&
+        (s->extradata_size > 0) &&
+        s->extradata) {
+        const uint8_t *ptr = s->extradata;
+        const uint8_t *end = s->extradata + s->extradata_size;
+        uint32_t stc;
+        uint8_t nalu_type;
 
-        if (AV_CODEC_ID_H264 == avctx->codec_id) {
-            nalu_type = stc & 0x1f;
+        while (ptr < end)
+        {
+          stc = -1;
+          ptr = avpriv_find_start_code(ptr, end, &stc);
+          if (ptr == end) {
+              break;
+          }
 
-            // If SPS/PPS already exists, no need to prepend it again;
-            // we use one of the SPS/PPS to simplify the checking.
-            if (H264_NAL_SPS == nalu_type || H264_NAL_PPS == nalu_type) {
-                ret = 0;
-                break;
-            } else if (nalu_type >= H264_NAL_SLICE &&
-                       nalu_type <= H264_NAL_IDR_SLICE) {
-                // VCL types result in stop of parsing, assuming header is
-                // at front of pkt (if existing).
-                break;
-            }
-        } else if (AV_CODEC_ID_HEVC == avctx->codec_id) {
-            nalu_type = (stc >> 1) & 0x3F;
+          if (AV_CODEC_ID_H264 == avctx->codec_id) {
+              nalu_type = stc & 0x1f;
 
-            // when header (VPS/SPS/PPS) already exists, no need to prepend it
-            // again; we use one of the VPS/SPS/PPS to simplify the checking.
-            if (HEVC_NAL_VPS == nalu_type || HEVC_NAL_SPS == nalu_type ||
-                HEVC_NAL_PPS == nalu_type) {
-                ret = 0;
-                break;
-            } else if (nalu_type >= HEVC_NAL_TRAIL_N &&
-                       nalu_type <= HEVC_NAL_RSV_VCL31) {
-                // VCL types results in stop of parsing, assuming header is
-                // at front of pkt (if existing).
-                break;
-            }
-        } else {
-            av_log(avctx, AV_LOG_DEBUG, "%s not AVC/HEVC codec: %d, skip!\n",
-                   __FUNCTION__, avctx->codec_id);
-            ret = 0;
-            break;
+              if (H264_NAL_SPS == nalu_type) {
+                  sps_num++;
+              } else if(H264_NAL_PPS == nalu_type) {
+                  pps_num++;
+              }
+
+              if (sps_num > H264_MAX_SPS_COUNT ||
+                  pps_num > H264_MAX_PPS_COUNT) {
+                  ret = 0;
+                  av_log(avctx, AV_LOG_WARNING, "Drop extradata because of repeated SPS/PPS\n");
+                  break;
+              }
+          } else if (AV_CODEC_ID_HEVC == avctx->codec_id) {
+              nalu_type = (stc >> 1) & 0x3F;
+
+              if (HEVC_NAL_VPS == nalu_type) {
+                  vps_num++;
+              } else if (HEVC_NAL_SPS == nalu_type) {
+                  sps_num++;
+              } else if (HEVC_NAL_PPS == nalu_type) {
+                  pps_num++;
+              }
+
+              if (vps_num > HEVC_MAX_VPS_COUNT ||
+                  sps_num > HEVC_MAX_SPS_COUNT ||
+                  pps_num > HEVC_MAX_PPS_COUNT) {
+                  ret = 0;
+                  av_log(avctx, AV_LOG_WARNING, "Drop extradata because of repeated VPS/SPS/PPS\n");
+                  break;
+              }
+          }
         }
     }
 
@@ -521,6 +532,35 @@ int ff_xcoder_dec_send(AVCodecContext *avctx, XCoderH264DecContext *s, AVPacket 
     xpkt->p_data = NULL;
     xpkt->data_len = pkt->size;
     xpkt->pkt_pos = pkt->pos;
+
+    uint8_t* p_side_data;
+#if LIBAVCODEC_VERSION_MAJOR >= 59
+    size_t side_size = 0;
+#else
+    int side_size = 0;
+#endif
+    p_side_data = av_packet_get_side_data(pkt, AV_PKT_DATA_PPU_CONFIG, &side_size);
+    if (p_side_data && side_size == sizeof(AVNIPpuConfig))
+    {
+        AVNIPpuConfig *av_ppu_config = (AVNIPpuConfig *)p_side_data;
+        ni_ppu_config_t ppu_config = {0};
+
+        for (int idx = 0; idx < NI_MAX_NUM_OF_DECODER_OUTPUTS; idx++)
+        {
+            if (av_ppu_config->out_enabled[idx] == 1)
+            {
+                ppu_config.ppu_set_enable += (0x01 << idx);
+                ppu_config.ppu_w[idx] = av_ppu_config->ppu_w[idx];
+                ppu_config.ppu_h[idx] = av_ppu_config->ppu_h[idx];
+            }
+        }
+        ret = ni_reconfig_ppu_output(&(s->api_ctx), &(s->api_param), &ppu_config);
+        if (ret < 0)
+        {
+            av_log(avctx, AV_LOG_ERROR, "%s(): ni_reconfig_ppu_output failed\n", __FUNCTION__);
+            goto fail;
+        }
+    }
 
     if (pkt->flags & AV_PKT_FLAG_KEY && extradata_size > 0 &&
         ff_xcoder_add_headers(avctx, pkt, extradata, extradata_size)) {
@@ -812,8 +852,8 @@ int retrieve_frame(AVCodecContext *avctx, AVFrame *data, int *got_frame,
   int frame_planar;
   int stride = 0;
   int res = 0;
-  AVHWFramesContext *ctx   = NULL;
-  NIFramesContext *dst_ctx = NULL;
+  AVHWFramesContext *ctx     = NULL;
+  AVNIFramesContext *dst_ctx = NULL;
   AVFrame *frame = data;
   ni_aux_data_t *aux_data       = NULL;
   AVFrameSideData *av_side_data = NULL;
@@ -872,7 +912,7 @@ int retrieve_frame(AVCodecContext *avctx, AVFrame *data, int *got_frame,
     if (frame->hw_frames_ctx) 
     {
       ctx = (AVHWFramesContext*)frame->hw_frames_ctx->data;
-      dst_ctx = ctx->internal->priv;
+      dst_ctx = (AVNIFramesContext*) ctx->hwctx;
     }
 
     // if (s->api_ctx.frame_num == 1)
@@ -1043,8 +1083,14 @@ FF_ENABLE_DEPRECATION_WARNINGS
         avctx->colorspace = frame->colorspace = xfme->color_space;
         avctx->color_primaries = frame->color_primaries = xfme->color_primaries;
     }
-  }
 
+    if (avctx->pix_fmt != AV_PIX_FMT_NI_QUAD) {
+        if (frame->format == AV_PIX_FMT_YUVJ420P && color_range == AVCOL_RANGE_MPEG)
+            frame->format = AV_PIX_FMT_YUV420P;
+        else if (frame->format == AV_PIX_FMT_YUV420P && color_range == AVCOL_RANGE_JPEG)
+            frame->format = AV_PIX_FMT_YUVJ420P;
+    }
+  }
   // User Data Unregistered SEI if available
   av_log(avctx, AV_LOG_VERBOSE, "#SEI# UDU (offset=%u len=%u)\n",
          xfme->sei_user_data_unreg_offset, xfme->sei_user_data_unreg_len);
@@ -1122,6 +1168,21 @@ FF_ENABLE_DEPRECATION_WARNINGS
           memcpy(hdrp, aux_data->data, aux_data->size);
       }
   } // hdr10+ sei
+
+#if ((LIBXCODER_API_VERSION_MAJOR > 2) ||                                        \
+      (LIBXCODER_API_VERSION_MAJOR == 2 && LIBXCODER_API_VERSION_MINOR>= 75))
+  // save error_ratio to side data
+  if (xfme->error_ratio > 0)
+  {
+      av_side_data =
+          av_frame_new_side_data(frame, AV_FRAME_DATA_NETINT_ERROR_RATIO, sizeof(uint32_t));
+      if (!av_side_data) {
+          return AVERROR(ENOMEM);
+      } else {
+          memcpy(av_side_data->data, &xfme->error_ratio, sizeof(uint32_t));
+      }
+  }
+#endif
 
   // remember to clean up auxiliary data of ni_frame after their use
   ni_frame_wipe_aux_data(xfme);
@@ -1512,7 +1573,7 @@ read_op:
       if (bSequenceChange)
       {
         AVHWFramesContext *ctx;
-        NIFramesContext *dst_ctx;
+        AVNIFramesContext *dst_ctx;
 
         av_buffer_unref(&avctx->hw_frames_ctx);
         avctx->hw_frames_ctx = av_hwframe_ctx_alloc(avctx->hw_device_ctx);
@@ -1535,7 +1596,7 @@ read_op:
         }
         
         ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
-        dst_ctx = ctx->internal->priv;
+        dst_ctx = (AVNIFramesContext*) ctx->hwctx;
         av_log(avctx, AV_LOG_VERBOSE, "ff_xcoder_dec_receive: sequence change, set hw_frame_context to copy decode sessions threads\n");
         ret = ni_device_session_copy(&s->api_ctx, &dst_ctx->api_ctx);
         if (NI_RETCODE_SUCCESS != ret)

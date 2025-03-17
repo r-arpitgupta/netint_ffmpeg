@@ -55,13 +55,13 @@ static av_cold int niupload_init(AVFilterContext *ctx)
         tmp_guid_id = ni_rsrc_get_device_by_block_name(s->device_name, NI_DEVICE_TYPE_UPLOAD);
         if (tmp_guid_id != NI_RETCODE_FAILURE)
         {
-           av_log(ctx, AV_LOG_VERBOSE,"User sets uploader device_name=%s, this will replace uploader_device_id\n",s->device_name);
+           av_log(ctx, AV_LOG_VERBOSE,"User set uploader device_name=%s. This will replace uploader_device_id\n",s->device_name);
            memset(buf, 0, sizeof(buf));
            snprintf(buf, sizeof(buf), "%d", tmp_guid_id);
         } 
         else
         {
-           av_log(ctx, AV_LOG_VERBOSE, "Uploader device_name=%s not found.Use default value of uploader device_num=%d instead.\n",s->device_name,s->device_idx);
+           av_log(ctx, AV_LOG_VERBOSE, "Uploader device_name=%s not found. Use default value of uploader device_num=%d instead.\n",s->device_name,s->device_idx);
         }
     }
 
@@ -284,7 +284,7 @@ static int activate(AVFilterContext *ctx)
 #else
     AVHWFramesContext *hwfc = (AVHWFramesContext *) outlink->hw_frames_ctx->data;
 #endif
-    NIFramesContext *ni_ctx = hwfc->internal->priv;
+    AVNIFramesContext *f_hwctx = (AVNIFramesContext*) hwfc->hwctx;
 
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
@@ -296,7 +296,7 @@ static int activate(AVFilterContext *ctx)
     {
         if (inlink->format != outlink->format)
         {
-            ret = ni_device_session_query_buffer_avail(&ni_ctx->api_ctx, NI_DEVICE_TYPE_UPLOAD);
+            ret = ni_device_session_query_buffer_avail(&f_hwctx->api_ctx, NI_DEVICE_TYPE_UPLOAD);
 
             if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
             {

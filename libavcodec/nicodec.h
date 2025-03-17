@@ -57,6 +57,12 @@ enum {
     HW_FRAMES_ON = 1
 };
 
+enum {
+    GEN_GLOBAL_HEADERS_AUTO = -1,
+    GEN_GLOBAL_HEADERS_OFF = 0,
+    GEN_GLOBAL_HEADERS_ON = 1
+};
+
 #if LIBAVCODEC_VERSION_MAJOR >= 60
 typedef struct OpaqueData {
     int64_t pkt_pos;
@@ -173,6 +179,7 @@ typedef struct XCoderH265EncContext {
   /* below are all command line options */
   char *xcoder_opts;
   char *xcoder_gop;
+  int gen_global_headers;
 
   int reconfigCount;
   int seqChangeCount;

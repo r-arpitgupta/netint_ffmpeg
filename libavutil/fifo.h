@@ -235,29 +235,6 @@ void av_fifo_reset2(AVFifo *f);
  */
 void av_fifo_freep2(AVFifo **f);
 
-//NETINT
-#if LIBAVUTIL_VERSION_MAJOR >= 59 //7.0
-
-int av_fifo_size(const AVFifo* f);
-
-AVFifo* av_fifo_alloc(unsigned int size);
-
-void av_fifo_free(AVFifo* f);
-
-int av_fifo_space(const AVFifo* f);
-
-int av_fifo_realloc2(AVFifo* f, unsigned int new_size);
-
-int av_fifo_generic_write(AVFifo* f, void* src, int size,
-    int (*func)(void*, void*, int));
-
-void av_fifo_drain(AVFifo* f, int size);
-
-int av_fifo_generic_peek(AVFifo* f, void* dest, int buf_size,
-    void (*func)(void*, void*, int));
-
-#endif
-
 /**
  * @}
  */

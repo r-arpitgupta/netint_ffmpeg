@@ -30,7 +30,6 @@ enum AVHWDeviceType {
     AV_HWDEVICE_TYPE_CUDA,
     AV_HWDEVICE_TYPE_VAAPI,
     AV_HWDEVICE_TYPE_DXVA2,
-    AV_HWDEVICE_TYPE_NI_LOGAN,
     AV_HWDEVICE_TYPE_NI_QUADRA,
     AV_HWDEVICE_TYPE_QSV,
     AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
@@ -103,8 +102,6 @@ typedef struct AVHWDeviceContext {
      */
     void *user_opaque;
 } AVHWDeviceContext;
-
-typedef struct FFHWFramesContext FFHWFramesContext;
 
 /**
  * This struct describes a set or pool of "hardware" frames (i.e. those with
@@ -219,9 +216,6 @@ typedef struct AVHWFramesContext {
      * Must be set by the user before calling av_hwframe_ctx_init().
      */
     int width, height;
-
-    //NETINT
-    FFHWFramesContext* internal;
 } AVHWFramesContext;
 
 /**

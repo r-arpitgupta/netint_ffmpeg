@@ -135,7 +135,8 @@ static int init_out_hwctxs(AVFilterContext *ctx, AVFrame *in)
             /* Don't check return code, this will intentionally fail */
             av_hwframe_ctx_init(s->out_frames_ref[i]);
 
-            ff_ni_clone_hwframe_ctx(in_frames_ctx, out_frames_ctx[i], NULL);
+            ni_cpy_hwframe_ctx(in_frames_ctx, out_frames_ctx[i]);
+            ((AVNIFramesContext *) out_frames_ctx[i]->hwctx)->split_ctx.enabled = 0;
         }
 
         for (i = 0; i < ctx->nb_outputs; i++) {
@@ -355,7 +356,7 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
     SplitContext *s        = avctx->priv;
     AVHWFramesContext *ctx;
     ni_split_context_t *p_split_ctx_dst = &s->src_ctx;
-    NIFramesContext *src_ctx;
+    AVNIFramesContext *src_ctx;
     ni_split_context_t *p_split_ctx_src;
     // av_log(ctx, AV_LOG_DEBUG, "ni_split config_input %p\n",
     // inlink->hw_frames_ctx);
@@ -384,7 +385,7 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
 #else
         ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
 #endif
-        src_ctx         = ctx->internal->priv;
+        src_ctx         = (AVNIFramesContext*) ctx->hwctx;
         p_split_ctx_src = &src_ctx->split_ctx;
         memcpy(p_split_ctx_dst, p_split_ctx_src, sizeof(ni_split_context_t));
         for (i = 0; i < 3; i++) {
@@ -420,9 +421,11 @@ static int filter_ni_frame(AVFilterLink *inlink, AVFrame *frame)
 
     if (!s->initialized) {
         for (i = 0; i < 3; i++) {
-            ff_ni_clone_hwframe_ctx((AVHWFramesContext *)frame->hw_frames_ctx->data, 
-                                    (AVHWFramesContext *)s->out_frames_ref[i]->data,
-                                    NULL);
+            AVHWFramesContext *in_frames_ctx = (AVHWFramesContext *)frame->hw_frames_ctx->data;
+            AVHWFramesContext *out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref[i]->data;
+            ni_cpy_hwframe_ctx(in_frames_ctx, out_frames_ctx);
+            AVNIFramesContext *ni_frames_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+            ni_frames_ctx->split_ctx.enabled = 0;
         }
         s->initialized = 1;
     }

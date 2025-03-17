@@ -61,7 +61,6 @@ static int ni_device_create(AVHWDeviceContext *ctx, const char *device,
 {
     AVNIDeviceContext *ni_hw_ctx;
     char *blk_name;
-    uint8_t *fw_rev;
     int i, module_id = 0, ret = 0;
     ni_device_handle_t fd;
     uint32_t max_io_size = NI_INVALID_IO_SIZE;
@@ -104,22 +103,12 @@ static int ni_device_create(AVHWDeviceContext *ctx, const char *device,
         for (i = 0; i < p_ni_devices->xcoder_cnt[NI_DEVICE_TYPE_ENCODER]; i++) {
             blk_name =
                 &(p_ni_devices->xcoders[NI_DEVICE_TYPE_ENCODER][i].blk_name[0]);
-            fw_rev =
-                &(p_ni_devices->xcoders[NI_DEVICE_TYPE_ENCODER][i].fw_rev[0]);
             // cone-to-one correspondence between card index and module_id
             module_id = p_ni_devices->xcoders[NI_DEVICE_TYPE_ENCODER][i].module_id;
             av_log(ctx, AV_LOG_DEBUG, "%s blk name %s\n", __func__, blk_name);
             fd = ni_device_open(blk_name, &max_io_size);
             if (fd != NI_INVALID_DEVICE_HANDLE) {
                 ni_hw_ctx->cards[module_id] = fd;
-                if (ni_rsrc_is_fw_compat(fw_rev) == 2) {
-                    av_log(ctx, AV_LOG_WARNING,
-                           "WARNING - Query %s FW "
-                           "version: %s is below the minimum support "
-                           "version for this SW version. Some features may "
-                           "be missing.\n",
-                           blk_name, fw_rev);
-                }
             }
         }
     } else {
@@ -194,7 +183,7 @@ static int ni_get_buffer(AVHWFramesContext *ctx, AVFrame *frame)
     uint8_t *buf;
     uint32_t buf_size;
     ni_frame_t *xfme;
-    NIFramesContext *ni_ctx = ctx->internal->priv;
+    AVNIFramesContext *f_hwctx = (AVNIFramesContext*) ctx->hwctx;
     ni_session_data_io_t dst_session_io_data;
     ni_session_data_io_t * p_dst_session_data = &dst_session_io_data;
     bool isnv12frame = (ctx->sw_format == AV_PIX_FMT_NV12 ||
@@ -206,7 +195,7 @@ static int ni_get_buffer(AVHWFramesContext *ctx, AVFrame *frame)
     memset(p_dst_session_data, 0, sizeof(dst_session_io_data));
     ret = ni_frame_buffer_alloc(&p_dst_session_data->data.frame, ctx->width,
                                 ctx->height, 0, 1, // codec type does not matter, metadata exists
-                                ni_ctx->api_ctx.bit_depth_factor, 1, !isnv12frame);
+                                f_hwctx->api_ctx.bit_depth_factor, 1, !isnv12frame);
     if (ret != 0) {
         return AVERROR(ENOMEM);
     }
@@ -250,8 +239,9 @@ static int ni_transfer_get_formats(AVHWFramesContext *ctx,
 
 static void ni_frames_uninit(AVHWFramesContext *ctx)
 {
-    NIFramesContext *ni_ctx = ctx->internal->priv;
-    int dev_dec_idx = ni_ctx->uploader_device_id; //Supplied by init_hw_device ni=<name>:<id> or ni_hwupload=<id>
+    AVNIFramesContext *f_hwctx = (AVNIFramesContext*) ctx->hwctx;
+
+    int dev_dec_idx = f_hwctx->uploader_device_id; //Supplied by init_hw_device ni=<name>:<id> or ni_hwupload=<id>
 
     av_log(ctx, AV_LOG_DEBUG, "%s: only close if upload instance, poolsize=%d "
                               "devid=%d\n",
@@ -259,35 +249,35 @@ static void ni_frames_uninit(AVHWFramesContext *ctx)
 
     if (dev_dec_idx != -2 && ctx->initial_pool_size >= 0)
     {
-        if (ni_ctx->src_session_io_data.data.frame.buffer_size
-            || ni_ctx->src_session_io_data.data.frame.metadata_buffer_size
-            || ni_ctx->src_session_io_data.data.frame.start_buffer_size)
+        if (f_hwctx->src_session_io_data.data.frame.buffer_size
+            || f_hwctx->src_session_io_data.data.frame.metadata_buffer_size
+            || f_hwctx->src_session_io_data.data.frame.start_buffer_size)
         {
             av_log(ctx, AV_LOG_DEBUG, "%s:free upload src frame buffer\n",
                  __func__);
-            ni_frame_buffer_free(&ni_ctx->src_session_io_data.data.frame);
+            ni_frame_buffer_free(&f_hwctx->src_session_io_data.data.frame);
         }
-        av_log(ctx, AV_LOG_VERBOSE, "SessionID = %d!\n", ni_ctx->api_ctx.session_id);
-        if (ni_ctx->api_ctx.session_id != NI_INVALID_SESSION_ID) {
-            ni_device_session_close(&ni_ctx->api_ctx, 1, NI_DEVICE_TYPE_UPLOAD);
+        av_log(ctx, AV_LOG_VERBOSE, "SessionID = %d!\n", f_hwctx->api_ctx.session_id);
+        if (f_hwctx->api_ctx.session_id != NI_INVALID_SESSION_ID) {
+            ni_device_session_close(&f_hwctx->api_ctx, 1, NI_DEVICE_TYPE_UPLOAD);
         }
-        ni_device_session_context_clear(&ni_ctx->api_ctx);
+        ni_device_session_context_clear(&f_hwctx->api_ctx);
 
         //only upload frames init allocates these ones
-        av_freep(&ni_ctx->surface_ptrs);
-        av_freep(&ni_ctx->surfaces_internal);
+        av_freep(&f_hwctx->surface_ptrs);
+        av_freep(&f_hwctx->surfaces_internal);
     }
     else
     {
-        ni_device_session_context_clear(&ni_ctx->api_ctx);
+        ni_device_session_context_clear(&f_hwctx->api_ctx);
     }
 
-    if (ni_ctx->suspended_device_handle != NI_INVALID_DEVICE_HANDLE)
+    if (f_hwctx->suspended_device_handle != NI_INVALID_DEVICE_HANDLE)
     {
         av_log(ctx, AV_LOG_DEBUG, "%s: close file handle, =%d\n",
-               __func__, ni_ctx->suspended_device_handle);
-        ni_device_close(ni_ctx->suspended_device_handle);
-        ni_ctx->suspended_device_handle = NI_INVALID_DEVICE_HANDLE;
+               __func__, f_hwctx->suspended_device_handle);
+        ni_device_close(f_hwctx->suspended_device_handle);
+        f_hwctx->suspended_device_handle = NI_INVALID_DEVICE_HANDLE;
     }
 }
 
@@ -298,14 +288,13 @@ static AVBufferRef *ni_pool_alloc(void *opaque,
                                   int size)
 #endif
 {
-    AVHWFramesContext    *ctx = (AVHWFramesContext*)opaque;
-    NIFramesContext       *s = ctx->internal->priv;
-    AVNIFramesContext *frames_hwctx = ctx->hwctx;
+    AVHWFramesContext *ctx = (AVHWFramesContext*)opaque;
+    AVNIFramesContext *f_hwctx = (AVNIFramesContext*) ctx->hwctx;
 
-    if (s->nb_surfaces_used < frames_hwctx->nb_surfaces) {
-        s->nb_surfaces_used++;
-        return av_buffer_create((uint8_t*)(s->surfaces_internal + s->nb_surfaces_used - 1),
-                                sizeof(*frames_hwctx->surfaces), NULL, NULL, 0);
+    if (f_hwctx->nb_surfaces_used < f_hwctx->nb_surfaces) {
+        f_hwctx->nb_surfaces_used++;
+        return av_buffer_create((uint8_t*) (f_hwctx->surfaces_internal + f_hwctx->nb_surfaces_used - 1),
+                                sizeof(*f_hwctx->surfaces), NULL, NULL, 0);
     }
 
     return NULL;
@@ -328,8 +317,7 @@ static int ni_init_surface(AVHWFramesContext *ctx, niFrameSurface1_t *surf)
 
 static int ni_init_pool(AVHWFramesContext *ctx)
 {
-    NIFramesContext              *s = ctx->internal->priv; //NI
-    AVNIFramesContext *frames_hwctx = ctx->hwctx;          //NI
+    AVNIFramesContext *f_hwctx = (AVNIFramesContext*) ctx->hwctx;
     int i, ret;
 
     av_log(ctx, AV_LOG_VERBOSE, "ctx->initial_pool_size = %d\n", ctx->initial_pool_size);
@@ -339,37 +327,44 @@ static int ni_init_pool(AVHWFramesContext *ctx)
         return AVERROR(EINVAL);
     }
 
-    s->surfaces_internal = av_calloc(ctx->initial_pool_size,
-                                     sizeof(*s->surfaces_internal));
-    if (!s->surfaces_internal) {
+    f_hwctx->surfaces_internal = av_calloc(ctx->initial_pool_size,
+                                           sizeof(*f_hwctx->surfaces_internal));
+    if (!f_hwctx->surfaces_internal) {
         return AVERROR(ENOMEM);
     }
 
     for (i = 0; i < ctx->initial_pool_size; i++) {
-        ret = ni_init_surface(ctx, &s->surfaces_internal[i]);
+        ret = ni_init_surface(ctx, &f_hwctx->surfaces_internal[i]);
         if (ret < 0) {
             return ret;
         }
     }
 
-    ctx->internal->pool_internal = av_buffer_pool_init2(sizeof(niFrameSurface1_t),
-                                                        ctx, ni_pool_alloc, NULL);
+    // STEVEN TODO: Should there be a custom pool free? (eg. ni_pool_free())
+#if IS_FFMPEG_70_AND_ABOVE_FOR_LIBAVUTIL
+    ffhwframesctx(ctx)->pool_internal =
+        av_buffer_pool_init2(sizeof(niFrameSurface1_t), ctx, ni_pool_alloc, NULL);
+    if (!ffhwframesctx(ctx)->pool_internal) {
+#else
+    ctx->internal->pool_internal =
+        av_buffer_pool_init2(sizeof(niFrameSurface1_t), ctx, ni_pool_alloc, NULL);
     if (!ctx->internal->pool_internal) {
+#endif
         return AVERROR(ENOMEM);
     }
 
-    frames_hwctx->surfaces = s->surfaces_internal;
-    frames_hwctx->nb_surfaces = ctx->initial_pool_size;
+    f_hwctx->surfaces = f_hwctx->surfaces_internal;
+    f_hwctx->nb_surfaces = ctx->initial_pool_size;
 
     return 0;
 }
 
 static int ni_init_internal_session(AVHWFramesContext *ctx)
 {
-    NIFramesContext              *s = ctx->internal->priv;
+    AVNIFramesContext *f_hwctx = (AVNIFramesContext*) ctx->hwctx;
     ni_log_set_level(ff_to_ni_log_level(av_log_get_level()));
     av_log(ctx, AV_LOG_INFO, "hwcontext_ni:ni_init_internal_session()\n");
-    if (ni_device_session_context_init(&(s->api_ctx)) < 0) {
+    if (ni_device_session_context_init(&(f_hwctx->api_ctx)) < 0) {
         av_log(ctx, AV_LOG_ERROR, "ni init context failure\n");
         return -1;
     }
@@ -377,33 +372,32 @@ static int ni_init_internal_session(AVHWFramesContext *ctx)
     return 0;
 }
 
-static void init_split_rsrc(NIFramesContext *ni_ctx, int w, int h)
+static void init_split_rsrc(AVNIFramesContext *f_hwctx, int w, int h)
 {
     int i;
-    ni_split_context_t* p_split_ctx = &ni_ctx->split_ctx;
+    ni_split_context_t* p_split_ctx = &f_hwctx->split_ctx;
     memset(p_split_ctx, 0, sizeof(ni_split_context_t));
     for (i = 0; i < 3; i++)
     {
-        ni_ctx->split_ctx.w[i] = w;
-        ni_ctx->split_ctx.h[i] = h;
-        ni_ctx->split_ctx.f[i] = -1;
+        p_split_ctx->w[i] = w;
+        p_split_ctx->h[i] = h;
+        p_split_ctx->f[i] = -1;
     }
 }
 
 static int ni_frames_init(AVHWFramesContext *ctx) //hwupload runs this on hwupload_config_output
 {
-  NIFramesContext *ni_ctx = ctx->internal->priv;
-  AVNIDeviceContext *device_hwctx = (AVNIDeviceContext *) ctx->device_ctx->hwctx;
+  AVNIFramesContext *f_hwctx = (AVNIFramesContext*) ctx->hwctx;
+  AVNIDeviceContext *device_hwctx = (AVNIDeviceContext*) ctx->device_ctx->hwctx;
   int linesize_aligned,height_aligned;
   int pool_size,ret;
-  AVNIFramesContext *frames_hwctx = (AVNIFramesContext *)ctx->hwctx;
 
   av_log(ctx, AV_LOG_INFO, "%s: Enter, supplied poolsize = %d, devid=%d\n",
          __func__, ctx->initial_pool_size, device_hwctx->uploader_ID);
 
-  ni_ctx->suspended_device_handle = NI_INVALID_DEVICE_HANDLE;
-  ni_ctx->uploader_device_id = -2; // -1 is load balance by pixel rate,
-                                   // default -2 invalid
+  f_hwctx->suspended_device_handle = NI_INVALID_DEVICE_HANDLE;
+  f_hwctx->uploader_device_id = -2; // -1 is load balance by pixel rate,
+                                    // default -2 invalid
   pool_size = ctx->initial_pool_size;
   if (device_hwctx->uploader_ID < -1) {
       if (pool_size > -1) // ffmpeg does not specify init_hw_device for decoder
@@ -420,7 +414,7 @@ static int ni_frames_init(AVHWFramesContext *ctx) //hwupload runs this on hwuplo
       return AVERROR(EINVAL);
   }
 
-  init_split_rsrc(ni_ctx, ctx->width, ctx->height);
+  init_split_rsrc(f_hwctx, ctx->width, ctx->height);
   if (pool_size <= -1) // None upload init returns here
   {
     av_log(ctx, AV_LOG_INFO, "%s: poolsize code %d, this code recquires no host pool\n",
@@ -432,8 +426,9 @@ static int ni_frames_init(AVHWFramesContext *ctx) //hwupload runs this on hwuplo
     pool_size = ctx->initial_pool_size = 3;
     av_log(ctx, AV_LOG_INFO, "%s: Pool_size autoset to %d\n", __func__, pool_size);
   }
-  /*Kept in private NIFramesContext for future reference, the device context version gets overwritten*/
-  ni_ctx->uploader_device_id = device_hwctx->uploader_ID; 
+ 
+  /*Kept in AVNIFramesContext for future reference, the AVNIDeviceContext data member gets overwritten*/
+  f_hwctx->uploader_device_id = device_hwctx->uploader_ID; 
 
   if ((ctx->width & 0x1) || (ctx->height & 0x1)) {
       av_log(ctx, AV_LOG_ERROR, "Odd resolution %dx%d not permitted\n",
@@ -447,86 +442,86 @@ static int ni_frames_init(AVHWFramesContext *ctx) //hwupload runs this on hwuplo
   height_aligned = ctx->height;
   ctx->height = NI_VPU_CEIL(height_aligned, 2);
 
-  ni_ctx->api_ctx.active_video_width = ctx->width;
-  ni_ctx->api_ctx.active_video_height = ctx->height;
+  f_hwctx->api_ctx.active_video_width = ctx->width;
+  f_hwctx->api_ctx.active_video_height = ctx->height;
 
   switch (ctx->sw_format)
   {
     case AV_PIX_FMT_YUV420P:
-      ni_ctx->api_ctx.bit_depth_factor = 1;
-      ni_ctx->api_ctx.src_bit_depth = 8;
-      ni_ctx->api_ctx.pixel_format = NI_PIX_FMT_YUV420P;
+      f_hwctx->api_ctx.bit_depth_factor = 1;
+      f_hwctx->api_ctx.src_bit_depth = 8;
+      f_hwctx->api_ctx.pixel_format = NI_PIX_FMT_YUV420P;
       break;
     case AV_PIX_FMT_YUV420P10LE:
-      ni_ctx->api_ctx.bit_depth_factor = 2;
-      ni_ctx->api_ctx.src_bit_depth = 10;
-      ni_ctx->api_ctx.src_endian = NI_FRAME_LITTLE_ENDIAN;
-      ni_ctx->api_ctx.pixel_format = NI_PIX_FMT_YUV420P10LE;
+      f_hwctx->api_ctx.bit_depth_factor = 2;
+      f_hwctx->api_ctx.src_bit_depth = 10;
+      f_hwctx->api_ctx.src_endian = NI_FRAME_LITTLE_ENDIAN;
+      f_hwctx->api_ctx.pixel_format = NI_PIX_FMT_YUV420P10LE;
       break;
     case AV_PIX_FMT_NV12:
-      ni_ctx->api_ctx.bit_depth_factor = 1;
-      ni_ctx->api_ctx.src_bit_depth = 8;
-      ni_ctx->api_ctx.pixel_format = NI_PIX_FMT_NV12;
+      f_hwctx->api_ctx.bit_depth_factor = 1;
+      f_hwctx->api_ctx.src_bit_depth = 8;
+      f_hwctx->api_ctx.pixel_format = NI_PIX_FMT_NV12;
       break;
     case AV_PIX_FMT_P010LE:
-      ni_ctx->api_ctx.bit_depth_factor = 2;
-      ni_ctx->api_ctx.src_bit_depth = 10;
-      ni_ctx->api_ctx.pixel_format = NI_PIX_FMT_P010LE;
-      ni_ctx->api_ctx.src_endian = NI_FRAME_LITTLE_ENDIAN;
+      f_hwctx->api_ctx.bit_depth_factor = 2;
+      f_hwctx->api_ctx.src_bit_depth = 10;
+      f_hwctx->api_ctx.pixel_format = NI_PIX_FMT_P010LE;
+      f_hwctx->api_ctx.src_endian = NI_FRAME_LITTLE_ENDIAN;
       break;
     case AV_PIX_FMT_RGBA:
-        ni_ctx->api_ctx.bit_depth_factor = 4;
-        ni_ctx->api_ctx.src_bit_depth    = 32;
-        ni_ctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
-        ni_ctx->api_ctx.pixel_format     = NI_PIX_FMT_RGBA;
+        f_hwctx->api_ctx.bit_depth_factor = 4;
+        f_hwctx->api_ctx.src_bit_depth    = 32;
+        f_hwctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
+        f_hwctx->api_ctx.pixel_format     = NI_PIX_FMT_RGBA;
         break;
     case AV_PIX_FMT_BGRA:
-        ni_ctx->api_ctx.bit_depth_factor = 4;
-        ni_ctx->api_ctx.src_bit_depth    = 32;
-        ni_ctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
-        ni_ctx->api_ctx.pixel_format     = NI_PIX_FMT_BGRA;
+        f_hwctx->api_ctx.bit_depth_factor = 4;
+        f_hwctx->api_ctx.src_bit_depth    = 32;
+        f_hwctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
+        f_hwctx->api_ctx.pixel_format     = NI_PIX_FMT_BGRA;
         break;
     case AV_PIX_FMT_ABGR:
-        ni_ctx->api_ctx.bit_depth_factor = 4;
-        ni_ctx->api_ctx.src_bit_depth    = 32;
-        ni_ctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
-        ni_ctx->api_ctx.pixel_format     = NI_PIX_FMT_ABGR;
+        f_hwctx->api_ctx.bit_depth_factor = 4;
+        f_hwctx->api_ctx.src_bit_depth    = 32;
+        f_hwctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
+        f_hwctx->api_ctx.pixel_format     = NI_PIX_FMT_ABGR;
         break;
     case AV_PIX_FMT_ARGB:
-        ni_ctx->api_ctx.bit_depth_factor = 4;
-        ni_ctx->api_ctx.src_bit_depth    = 32;
-        ni_ctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
-        ni_ctx->api_ctx.pixel_format     = NI_PIX_FMT_ARGB;
+        f_hwctx->api_ctx.bit_depth_factor = 4;
+        f_hwctx->api_ctx.src_bit_depth    = 32;
+        f_hwctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
+        f_hwctx->api_ctx.pixel_format     = NI_PIX_FMT_ARGB;
         break;
     case AV_PIX_FMT_BGR0:
-        ni_ctx->api_ctx.bit_depth_factor = 4;
-        ni_ctx->api_ctx.src_bit_depth    = 32;
-        ni_ctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
-        ni_ctx->api_ctx.pixel_format     = NI_PIX_FMT_BGR0;
+        f_hwctx->api_ctx.bit_depth_factor = 4;
+        f_hwctx->api_ctx.src_bit_depth    = 32;
+        f_hwctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
+        f_hwctx->api_ctx.pixel_format     = NI_PIX_FMT_BGR0;
         break;
     case AV_PIX_FMT_BGRP:
-        ni_ctx->api_ctx.bit_depth_factor = 1;
-        ni_ctx->api_ctx.src_bit_depth    = 24;
-        ni_ctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
-        ni_ctx->api_ctx.pixel_format     = NI_PIX_FMT_BGRP;
+        f_hwctx->api_ctx.bit_depth_factor = 1;
+        f_hwctx->api_ctx.src_bit_depth    = 24;
+        f_hwctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
+        f_hwctx->api_ctx.pixel_format     = NI_PIX_FMT_BGRP;
         break;
     case AV_PIX_FMT_YUYV422:
-        ni_ctx->api_ctx.bit_depth_factor = 1;
-        ni_ctx->api_ctx.src_bit_depth    = 8;
-        ni_ctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
-        ni_ctx->api_ctx.pixel_format     = NI_PIX_FMT_YUYV422;
+        f_hwctx->api_ctx.bit_depth_factor = 1;
+        f_hwctx->api_ctx.src_bit_depth    = 8;
+        f_hwctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
+        f_hwctx->api_ctx.pixel_format     = NI_PIX_FMT_YUYV422;
         break;
     case AV_PIX_FMT_UYVY422:
-        ni_ctx->api_ctx.bit_depth_factor = 1;
-        ni_ctx->api_ctx.src_bit_depth    = 8;
-        ni_ctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
-        ni_ctx->api_ctx.pixel_format     = NI_PIX_FMT_UYVY422;
+        f_hwctx->api_ctx.bit_depth_factor = 1;
+        f_hwctx->api_ctx.src_bit_depth    = 8;
+        f_hwctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
+        f_hwctx->api_ctx.pixel_format     = NI_PIX_FMT_UYVY422;
         break;
     case AV_PIX_FMT_NV16:
-        ni_ctx->api_ctx.bit_depth_factor = 1;
-        ni_ctx->api_ctx.src_bit_depth    = 8;
-        ni_ctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
-        ni_ctx->api_ctx.pixel_format     = NI_PIX_FMT_NV16;
+        f_hwctx->api_ctx.bit_depth_factor = 1;
+        f_hwctx->api_ctx.src_bit_depth    = 8;
+        f_hwctx->api_ctx.src_endian       = NI_FRAME_LITTLE_ENDIAN;
+        f_hwctx->api_ctx.pixel_format     = NI_PIX_FMT_NV16;
         break;
     default:
         av_log(ctx, AV_LOG_ERROR, "Pixel format not supported by device.\n");
@@ -542,7 +537,7 @@ static int ni_frames_init(AVHWFramesContext *ctx) //hwupload runs this on hwuplo
     av_log(ctx, AV_LOG_ERROR, "Max Supported Width: %d Height %d Area %d\n",
       NI_MAX_RESOLUTION_WIDTH, NI_MAX_RESOLUTION_HEIGHT, NI_MAX_RESOLUTION_AREA);
     return AVERROR_EXTERNAL;
-  } else if (ni_ctx->uploader_device_id >= -1) {
+  } else if (f_hwctx->uploader_device_id >= -1) {
       // leave it to ni_device_session_open to handle uploader session open
       // based on api_ctx.hw_id set to proper value
   } else {
@@ -554,19 +549,19 @@ static int ni_frames_init(AVHWFramesContext *ctx) //hwupload runs this on hwuplo
          "pixel sw_format=%d width = %d height = %d outformat=%d "
          "uploader_device_id=%d\n",
          ctx->sw_format, ctx->width, ctx->height, ctx->format,
-         ni_ctx->uploader_device_id);
+         f_hwctx->uploader_device_id);
 
-  ni_ctx->api_ctx.hw_id = ni_ctx->uploader_device_id;
-  ni_ctx->api_ctx.keep_alive_timeout = frames_hwctx->keep_alive_timeout;
-  if (0 == ni_ctx->api_ctx.keep_alive_timeout )
+  f_hwctx->api_ctx.hw_id = f_hwctx->uploader_device_id;
+  f_hwctx->api_ctx.keep_alive_timeout = f_hwctx->keep_alive_timeout;
+  if (0 == f_hwctx->api_ctx.keep_alive_timeout )
   {
-    ni_ctx->api_ctx.keep_alive_timeout = NI_DEFAULT_KEEP_ALIVE_TIMEOUT;
+    f_hwctx->api_ctx.keep_alive_timeout = NI_DEFAULT_KEEP_ALIVE_TIMEOUT;
   }
 
-  ni_ctx->api_ctx.framerate.framerate_num = frames_hwctx->framerate.num;
-  ni_ctx->api_ctx.framerate.framerate_denom = frames_hwctx->framerate.den;
+  f_hwctx->api_ctx.framerate.framerate_num = f_hwctx->framerate.num;
+  f_hwctx->api_ctx.framerate.framerate_denom = f_hwctx->framerate.den;
 
-  ret = ni_device_session_open(&ni_ctx->api_ctx, NI_DEVICE_TYPE_UPLOAD);
+  ret = ni_device_session_open(&f_hwctx->api_ctx, NI_DEVICE_TYPE_UPLOAD);
   if (ret != NI_RETCODE_SUCCESS)
   {
     av_log(ctx, AV_LOG_ERROR, "Error Something wrong in xcoder open\n");
@@ -577,23 +572,23 @@ static int ni_frames_init(AVHWFramesContext *ctx) //hwupload runs this on hwuplo
   {
     av_log(ctx, AV_LOG_VERBOSE,
             "XCoder %s.%d (inst: %d) opened successfully\n",
-            ni_ctx->api_ctx.dev_xcoder_name, ni_ctx->api_ctx.hw_id,
-            ni_ctx->api_ctx.session_id);
+            f_hwctx->api_ctx.dev_xcoder_name, f_hwctx->api_ctx.hw_id,
+            f_hwctx->api_ctx.session_id);
 #ifndef _WIN32
     // replace device_handle with blk_io_handle
-    ni_device_close(ni_ctx->api_ctx.device_handle);
-    ni_ctx->api_ctx.device_handle = ni_ctx->api_ctx.blk_io_handle;
+    ni_device_close(f_hwctx->api_ctx.device_handle);
+    f_hwctx->api_ctx.device_handle = f_hwctx->api_ctx.blk_io_handle;
 #endif
     // save blk_io_handle for track
-    device_hwctx->uploader_handle = ni_ctx->api_ctx.blk_io_handle;
+    device_hwctx->uploader_handle = f_hwctx->api_ctx.blk_io_handle;
   }
-  memset(&ni_ctx->src_session_io_data, 0, sizeof(ni_session_data_io_t));
+  memset(&f_hwctx->src_session_io_data, 0, sizeof(ni_session_data_io_t));
 
   // enable buffer_limit for FFmpeg>=7.0 by default
 #if IS_FFMPEG_61_AND_ABOVE_FOR_LIBAVUTIL
-  ret = ni_device_session_init_framepool(&ni_ctx->api_ctx, pool_size, NI_UPLOADER_FLAG_LM);
+  ret = ni_device_session_init_framepool(&f_hwctx->api_ctx, pool_size, NI_UPLOADER_FLAG_LM);
 #else
-  ret = ni_device_session_init_framepool(&ni_ctx->api_ctx, pool_size, 0);
+  ret = ni_device_session_init_framepool(&f_hwctx->api_ctx, pool_size, 0);
 #endif
 
   if (ret < 0)
@@ -957,7 +952,7 @@ static int av_to_niframe_copy(AVHWFramesContext *hwfc, const int dst_stride[4],
 
 static int ni_hwdl_frame(AVHWFramesContext *hwfc, AVFrame *dst,
                          const AVFrame *src) {
-    NIFramesContext *ctx = hwfc->internal->priv;
+    AVNIFramesContext *f_hwctx = (AVNIFramesContext*) hwfc->hwctx;
     ni_session_data_io_t session_io_data;
     ni_session_data_io_t *p_session_data = &session_io_data;
     niFrameSurface1_t *src_surf          = (niFrameSurface1_t *)src->data[3];
@@ -1027,8 +1022,8 @@ static int ni_hwdl_frame(AVHWFramesContext *hwfc, AVFrame *dst,
         return AVERROR(ENOMEM);
     }
 
-    ctx->api_ctx.is_auto_dl = false;
-    ret = ni_device_session_hwdl(&ctx->api_ctx, p_session_data, src_surf);
+    f_hwctx->api_ctx.is_auto_dl = false;
+    ret = ni_device_session_hwdl(&f_hwctx->api_ctx, p_session_data, src_surf);
     if (ret <= 0) {
         av_log(hwfc, AV_LOG_DEBUG, "%s failed to retrieve frame\n", __func__);
         ni_frame_buffer_free(&p_session_data->data.frame);
@@ -1052,7 +1047,7 @@ static int ni_hwdl_frame(AVHWFramesContext *hwfc, AVFrame *dst,
 
 static int ni_hwup_frame(AVHWFramesContext *hwfc, AVFrame *dst, const AVFrame *src)
 {
-    NIFramesContext *ctx = hwfc->internal->priv;
+    AVNIFramesContext *f_hwctx = (AVNIFramesContext*) hwfc->hwctx;
     ni_session_data_io_t *p_src_session_data;
     niFrameSurface1_t *dst_surf;
     int ret = 0;
@@ -1068,8 +1063,7 @@ static int ni_hwup_frame(AVHWFramesContext *hwfc, AVFrame *dst, const AVFrame *s
         return AVERROR(EINVAL);
     }
 
-    // memset(&ctx->src_session_io_data, 0, sizeof(ni_session_data_io_t));
-    p_src_session_data = &ctx->src_session_io_data;
+    p_src_session_data = &f_hwctx->src_session_io_data;
 
     switch (src->format) {
     /* 8-bit YUV420 planar */
@@ -1214,12 +1208,16 @@ static int ni_hwup_frame(AVHWFramesContext *hwfc, AVFrame *dst, const AVFrame *s
     */
     default:
         av_log(hwfc, AV_LOG_ERROR, "Pixel format %s not supported by device %s\n",
+#if IS_FFMPEG_70_AND_ABOVE_FOR_LIBAVUTIL
+               av_get_pix_fmt_name(src->format), ffhwframesctx(hwfc)->hw_type->name);
+#else
                av_get_pix_fmt_name(src->format), hwfc->internal->hw_type->name);
+#endif
         return AVERROR(EINVAL);
     }
 
     // check input resolution zero copy compatible or not
-    if (ni_uploader_frame_zerocopy_check(&ctx->api_ctx,
+    if (ni_uploader_frame_zerocopy_check(&f_hwctx->api_ctx,
         src->width, src->height,
         (const int *)src->linesize, pixel_format) == NI_RETCODE_SUCCESS)
     {
@@ -1260,15 +1258,15 @@ static int ni_hwup_frame(AVHWFramesContext *hwfc, AVFrame *dst, const AVFrame *s
         }
     }
 
-    ret = ni_device_session_hwup(&ctx->api_ctx, p_src_session_data, dst_surf);
+    ret = ni_device_session_hwup(&f_hwctx->api_ctx, p_src_session_data, dst_surf);
     if (ret < 0) {
         av_log(hwfc, AV_LOG_ERROR, "%s failed to upload frame %d\n",
                __func__, ret);
         return AVERROR_EXTERNAL;
     }
 
-    dst_surf->ui16width = ctx->split_ctx.w[0] = src->width;
-    dst_surf->ui16height = ctx->split_ctx.h[0] = src->height;
+    dst_surf->ui16width = f_hwctx->split_ctx.w[0] = src->width;
+    dst_surf->ui16height = f_hwctx->split_ctx.h[0] = src->height;
     dst_surf->ui32nodeAddress = 0; // always 0 offset for upload
     dst_surf->encoding_type = isSemiPlanar ? NI_PIXEL_PLANAR_FORMAT_SEMIPLANAR
                                            : NI_PIXEL_PLANAR_FORMAT_PLANAR;
@@ -1278,12 +1276,12 @@ static int ni_hwup_frame(AVHWFramesContext *hwfc, AVFrame *dst, const AVFrame *s
            dst_surf->ui16session_ID);
 
     // Update frames context
-    ctx->split_ctx.f[0] = (int)dst_surf->encoding_type;
+    f_hwctx->split_ctx.f[0] = (int)dst_surf->encoding_type;
     
     /* Set the hw_id/card number in AVNIFramesContext */
     AVNIFramesContext* ni_hwf_ctx;
     ni_hwf_ctx = (AVNIFramesContext*)((AVHWFramesContext*)dst->hw_frames_ctx->data)->hwctx;
-    ni_hwf_ctx->hw_id = ctx->api_ctx.hw_id;
+    ni_hwf_ctx->hw_id = f_hwctx->api_ctx.hw_id;
 
       size_t crop_right = 0, crop_bottom = 0;
       // only FFmpeg 3.4.2 and above have crop_*
@@ -1343,7 +1341,6 @@ const HWContextType ff_hwcontext_type_ni_quadra = {
 
     .device_hwctx_size = sizeof(AVNIDeviceContext),
     .frames_hwctx_size = sizeof(AVNIFramesContext),
-    .frames_priv_size  = sizeof(NIFramesContext),
 
     .device_create = ni_device_create,
     .device_uninit = ni_device_uninit,

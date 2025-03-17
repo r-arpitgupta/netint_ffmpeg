@@ -1381,27 +1381,15 @@ static int ost_add(Muxer *mux, const OptionsContext *o, enum AVMediaType type,
 
         threads_manual = !!av_dict_get(encoder_opts, "threads", NULL, 0);
 
-        // NETINT: automatically enable xcoder-params=GenHdrs for MKV/HLS/ASF/FLV containers
-        if (!strcmp(mux->fc->oformat->name, "matroska") ||
+        // NETINT: automatically enable gen_global_headers for MKV/HLS/ASF/FLV containers
+        if ((ost->enc_ctx->codec_type == AVMEDIA_TYPE_VIDEO) &&
+            (!strcmp(mux->fc->oformat->name, "matroska") ||
             !strcmp(mux->fc->oformat->name, "hls") ||
             !strcmp(mux->fc->oformat->name, "asf") ||
-            !strcmp(mux->fc->oformat->name, "flv")) {
-            AVDictionaryEntry *t;
-            if ((t = av_dict_get(encoder_opts, "xcoder-params", NULL, 0))) {
-                int i;
-                size_t len = strlen(t->value);
-                // Remove all colons if exist at the end of option values before appending GenHdrs
-                for(i=len-1; i>0; i--) {
-                    if(t->value[i] == ':')
-                        t->value[i] = '\0';
-                    else
-                        break;
-                }
-                av_dict_set(&encoder_opts, "xcoder-params", ":GenHdrs=1", AV_DICT_APPEND);
-            } else {
-                av_opt_set(ost->enc_ctx->priv_data, "xcoder-params", "GenHdrs=1", 0);
-            }
+            !strcmp(mux->fc->oformat->name, "flv"))) {
+            av_opt_set(ost->enc_ctx->priv_data, "gen_global_headers", "on", 0);
         }
+
         ret = av_opt_set_dict2(ost->enc_ctx, &encoder_opts, AV_OPT_SEARCH_CHILDREN);
         if (ret < 0) {
             av_log(ost, AV_LOG_ERROR, "Error applying encoder options: %s\n",

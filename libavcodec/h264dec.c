@@ -693,9 +693,6 @@ static int decode_nal_units(H264Context *h, const uint8_t *buf, int buf_size)
                 avpriv_request_sample(avctx, "Late SEI");
                 break;
             }
-#if CONFIG_NI_LOGAN
-            h->sei.ni_custom.type = h->custom_sei_type;
-#endif
             ret = ff_h264_sei_decode(&h->sei, &nal->gb, &h->ps, avctx);
             h->has_recovery_point = h->has_recovery_point || h->sei.recovery_point.recovery_frame_cnt != -1;
             if (avctx->debug & FF_DEBUG_GREEN_MD)
@@ -1114,10 +1111,6 @@ static const AVOption h264_options[] = {
     { "x264_build", "Assume this x264 version if no x264 version found in any SEI", OFFSET(x264_build), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, VD },
     { "skip_gray", "Do not return gray gap frames", OFFSET(skip_gray), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
     { "noref_gray", "Avoid using gray gap frames as references", OFFSET(noref_gray), AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, VD },
-#if CONFIG_NI_LOGAN
-    // NETINT: Extra h264 decoding option
-    { "custom_sei_passthru", "Specify a custom SEI type to passthrough", OFFSET(custom_sei_type), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 254, VD },
-#endif
     { NULL },
 };
 

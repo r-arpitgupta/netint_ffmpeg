@@ -31,7 +31,6 @@
 #include "version.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/imgutils.h"
-#include "libavutil/hwcontext_internal.h"
 #include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_ni_quad.h"
 
@@ -45,11 +44,9 @@
     ((LIBAVFILTER_VERSION_MAJOR > 7) ||                                        \
      (LIBAVFILTER_VERSION_MAJOR == 7 && LIBAVFILTER_VERSION_MINOR >= 85))
 
-
 #define IS_FFMPEG_61_AND_ABOVE                                                \
     ((LIBAVFILTER_VERSION_MAJOR > 9) ||                                        \
      (LIBAVFILTER_VERSION_MAJOR == 9 && LIBAVFILTER_VERSION_MINOR >= 12))
-
 
 #define IS_FFMPEG_70_AND_ABOVE                                                \
     ((LIBAVFILTER_VERSION_MAJOR > 10) ||                                      \
@@ -86,9 +83,6 @@ int ff_ni_copy_device_to_host_frame(AVFrame *dst, const ni_frame_t *src, int pix
 int ff_ni_copy_host_to_device_frame(ni_frame_t *dst, const AVFrame *src, int pix_fmt);
 int ff_ni_build_frame_pool(ni_session_context_t *ctx,int width,int height, enum AVPixelFormat out_format, int pool_size, int buffer_limit);
 void ff_ni_frame_free(void *opaque, uint8_t *data);
-void ff_ni_clone_hwframe_ctx(AVHWFramesContext *in_frames_ctx,
-                             AVHWFramesContext *out_frames_ctx,
-                             ni_session_context_t *ctx);
 void ff_ni_set_bit_depth_and_encoding_type(int8_t *p_bit_depth,
                                            int8_t *p_enc_type,
                                            enum AVPixelFormat pix_fmt);

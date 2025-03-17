@@ -275,9 +275,10 @@ static int process_frame(FFFrameSync *fs)
         if (retcode < 0)
             goto fail;
 
-        ff_ni_clone_hwframe_ctx(
-            pAVHFWCtx, (AVHWFramesContext *)s->out_frames_ref->data,
-                                &s->api_ctx);
+        AVHWFramesContext *out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
+        AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+        ni_cpy_hwframe_ctx(pAVHFWCtx, out_frames_ctx);
+        ni_device_session_copy(&s->api_ctx, &out_ni_ctx->api_ctx);
 
         s->initialized = 1;
     }

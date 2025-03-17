@@ -555,11 +555,6 @@ typedef struct HEVCContext {
                             ///< as a format defined in 14496-15
     int apply_defdispwin;
 
-#if CONFIG_NI_LOGAN
-    // NETINT: option as custom HEVC SEI type setting
-    int custom_sei_type;    ///< NI custom HEVC SEI type
-    int custom_sei_location;  ///< NI custom HEVC SEI location
-#endif
     // multi-layer AVOptions
     int         *view_ids;
     unsigned  nb_view_ids;

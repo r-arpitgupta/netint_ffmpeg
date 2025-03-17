@@ -2,7 +2,7 @@
 Netint FFmpeg Change List - Quadra
 ==================================
 
-This document was last updated for Netint Quadra SW release v5.1.0.
+This document was last updated for Netint Quadra SW release v5.2.0.
 
 --------------------------------------------------
 build_ffmpeg.sh
@@ -14,8 +14,7 @@ Build options for android-NDK compilation
 --------------------------------------------------
 configure
 --------------------------------------------------
-Add '--enable-ni_logan' as an autodetected FFmpeg configure option and as a dependency for h264_ni_logan_dec, h265_ni_logan_dec, h264_ni_logan_enc, and h265_ni_logan_enc
-Add '--enable-ni_quadra' as an autodetected FFmpeg configure option and as a dependency for h264_ni_quadra_dec, h265_ni_quadra_dec, h264_ni_quadra_enc, h265_ni_quadra_enc, ni_quadra_hwupload, ni_quadra_drawbox, ni_quadra_drawtext, ni_quadra_bg, ni_quadra_bgr, ni_quadra_crop, ni_quadra_overlay, ni_quadra_pad, ni_quadra_rotate, ni_quadra_scale, ni_quadra_split, ni_quadra_merge, ni_quadra_flip, ni_quadra_roi, ni_quadra_xstack and ni_quadra_delogo
+Add '--enable-ni_quadra' as an autodetected FFmpeg configure option and as a dependency for h264_ni_quadra_dec, h265_ni_quadra_dec, h264_ni_quadra_enc, h265_ni_quadra_enc, ni_quadra_hwupload, ni_quadra_drawbox, ni_quadra_drawtext, ni_quadra_bg, ni_quadra_bgr, ni_quadra_crop, ni_quadra_overlay, ni_quadra_pad, ni_quadra_rotate, ni_quadra_scale, ni_quadra_split, ni_quadra_merge, ni_quadra_flip, ni_quadra_roi, ni_quadra_xstack, ni_quadra_delogo, and ni_quadra_hvsplus
 Add libfontconfig and libfribidi as suggested dependencies for ni_quadra_drawtext
 Add libfreetype as a dependency for ni_quadra_drawtext
 Add '--enable-ni_quadra' as an autodetected FFmpeg configure option and as a dependency for ni_quadra_p2pxfer
@@ -33,11 +32,6 @@ ffmpeg.h            fftools/ffmpeg.h
 Add FFmpeg option ni_interval_fps to display window averaged processing FPS
 Add support for Netint Quadra hardware frames
 Add FFmpeg option force_nidec to select appropriate Netint decoder for autodetected codec in input
-
---------------------------------------------------
-fftools/ffmpeg_dec.c
---------------------------------------------------
-On decoder error, exit instead of continuing to avoid dead loop
 
 --------------------------------------------------
 fftools/ffmpeg_demux.c
@@ -63,7 +57,7 @@ When choosing input to read frame from, if all inputs have ended, return EOF ins
 --------------------------------------------------
 fftools/ffmpeg_mux_init.c
 --------------------------------------------------
-Automatically enable xcoder-params "GenHdrs=1" for MKV, HLS, ASF, and FLV output formats for video codecs for FLV
+Automatically enable gen_global_headers for MKV, HLS, ASF, and FLV output formats for VIDEO
 
 --------------------------------------------------
 ffmpeg_ni_quad.c    fftools/ffmpeg_ni_quad.c
@@ -123,6 +117,11 @@ libavcodec/h264_mp4toannexb_bsf.c
 Pass AV_PKT_DATA_NEW_EXTRADATA to AVCodecParameters->extradata
 
 --------------------------------------------------
+libavcodec/h264_parser.c
+--------------------------------------------------
+Initialize custom_sei_passthru variable in parser
+
+--------------------------------------------------
 libavcodec/h264.c       libavcodec/h264dec.c
 libavcodec/h264.h       libavcodec/h264dec.h
 libavcodec/h264_sei.c
@@ -140,6 +139,11 @@ libavcodec/hevc_mp4toannexb_bsf.c
 --------------------------------------------------
 Do not prepend headers to IRAP frame packets if VPS/PPS is already part of frame packet
 Pass AV_PKT_DATA_NEW_EXTRADATA to AVCodecParameters->extradata
+
+--------------------------------------------------
+libavcodec/hevc_parser.c
+--------------------------------------------------
+Initialize custom_sei_passthru variable in parser
 
 --------------------------------------------------
 libavcodec/hevc/hevcdec.c
@@ -282,6 +286,7 @@ libavcodec/packet.h
 --------------------------------------------------
 Add AV_PKT_DATA_SLICE_ADDR to AVPacketSideDataType
 Add AV_PKT_DATA_PKT_INFO to AVPacketSideDataType
+Add AV_PKT_DATA_PPU_CONFIG to AVPacketSideDataType and AVNIPpuConfig struct
 
 --------------------------------------------------
 libavfilter/allfilters.c
@@ -301,6 +306,7 @@ Add 'ni_quadra_split' as a filter for duplicating hardware frames to multiple de
 Add 'ni_quadra_delogo' filter for logo removal in selected area using Netint Quadra hardware acceleration
 Add 'ni_quadra_merge' as a filter for merging two hardware input frames, one for Y and the other for UV
 Add 'ni_quadra_ai_pre' as a filter to run user selected AI network binary on video using Netint Quadra hardware acceleration
+Add 'ni_quadra_hvsplus' as a filter to enhance video at the pre-processing stage before encoding, thereby improving VMAF
 Add 'ni_quadra_roi' as a filter for AI Region-of-Interest detection using Netint Quadra hardware acceleration
 Add 'ni_logan_hwupload' as a filter for upload of hardware frames to Netint Logan devices
 Add 'ni_quadra_yuv420to444' as a filter to combine two yuv420 frames generated by yuv444to420 into a yuv444 frame
@@ -309,11 +315,6 @@ Add 'ni_quadra_p2pxfer' as a filter to do a p2p transfer between quadra devices
 Make sure 'ni_logan_hwupload' is added after all quadra filters are added
 Add 'ni_quadra_xstack' as a filter to combine many frames onto a grid using Netint Quadra hardware acceleration
 Add 'ni_quadra_sdl' as a filter to display frames to monitor via Simple Directmedia Layer
-
---------------------------------------------------
-libavfilter/avfiltergraph.c
---------------------------------------------------
-Skip format conversion check for ni_quadra_overlay and ni_quadra_xstack
 
 --------------------------------------------------
 libavfilter/buffersrc.c
@@ -338,6 +339,7 @@ Add vf_delogo_ni.o to obj dependecies
 Add vf_merge_ni.o to obj dependecies
 Add vf_ai_pre_ni.o to obj dependencies
 Add vf_flip_ni.o to obj dependecies
+ADD vf_hvsplus_ni.o to obj dependencies
 Add vf_roi_ni.o to obj dependencies
 Add vf_hwupload_ni_logan.o to obj dependencies
 Add vf_yuv444to420_ni.o to obj dependencies
@@ -391,6 +393,11 @@ Fix a memory leak when using filter through API
 libavfilter/vf_drawtext_ni.c
 --------------------------------------------------
 Add 'ni_quadra_drawtext' as a filter for drawing text on top of Netint Quadra hardware frames using libfreetype library
+
+--------------------------------------------------
+libavfilter/vf_hvsplus_ni.c
+--------------------------------------------------
+Add 'ni_quadra_hvsplus' as a filter to enhance video at the pre-processing stage before encoding, thereby improving VMAF
 
 --------------------------------------------------
 libavfilter/vf_hwupload.c
@@ -577,6 +584,7 @@ Add av_frame side data for live bitrate reconfiguration
 Add av_frame side data for long term reference frame support
 Add av_frame side data for min/max qp value reconfiguration
 Add av_frame side data for general reconfiguration
+Add av_frame side data for frame error ratio
 Add variables for classification and probability to AVRegionOfInterest struct
 
 --------------------------------------------------
@@ -585,15 +593,11 @@ libavutil/hwcontext.h
 --------------------------------------------------
 Add support for Netint Quadra hardware frame context
 Add support for Netint Logan hardware frame context
-Add a pointer(FFHWFramesContext *internal) in AVHWFramesContext for backward compatibility
-Alloc priv pointer in FFHWFramesContext for backward compatibility
 
 --------------------------------------------------
 libavutil/hwcontext_internal.h
 --------------------------------------------------
 Add support for Netint Quadra hardware frame context
-Add a pointer(void *priv) in FFHWFramesContext for backward compatibility
-Add frames_priv_size in HWContextType for allocatin priv in FFHWFramesContext
 
 --------------------------------------------------
 libavutil/hwcontext_ni_logan.c

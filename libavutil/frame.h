@@ -220,6 +220,12 @@ enum AVFrameSideDataType {
      */
     AV_FRAME_DATA_NETINT_REGIONS_OF_INTEREST_EXTRA,
 
+    // NETINT: decoded frame error ratio info
+    /**
+     * This side data takes uint32_t type data as payload which indicates the new error ratio info.
+     */
+    AV_FRAME_DATA_NETINT_ERROR_RATIO,
+
     /**
      * Film grain parameters for a frame, described by AVFilmGrainParams.
      * Must be present for every frame which should have film grain applied.

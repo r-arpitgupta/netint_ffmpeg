@@ -54,7 +54,6 @@
 #include <windows.h>
 #endif
 
-
 typedef struct BenchmarkTimeStamps {
     int64_t real_usec;
     int64_t user_usec;
@@ -165,7 +164,6 @@ int ff_ni_ffmpeg_to_libxcoder_pix_fmt(enum AVPixelFormat pix_fmt)
     return -1;
 }
 
-
 int ff_ni_copy_device_to_host_frame(AVFrame *dst, const ni_frame_t *src, int pix_fmt)
 {
   switch (pix_fmt)
@@ -271,7 +269,6 @@ void ff_ni_frame_free(void *opaque, uint8_t *data)
   }
 };
 
-
 int ff_ni_build_frame_pool(ni_session_context_t *ctx,
                            int width, int height,
                            enum AVPixelFormat out_format,
@@ -305,49 +302,6 @@ int ff_ni_build_frame_pool(ni_session_context_t *ctx,
                              NI_DEVICE_TYPE_SCALER);
 
     return rc;
-}
-
-void ff_ni_clone_hwframe_ctx(AVHWFramesContext *in_frames_ctx,
-                             AVHWFramesContext *out_frames_ctx,
-                             ni_session_context_t *ctx)
-{
-  AVNIFramesContext *in_frames_hwctx;
-  AVNIFramesContext *out_frames_hwctx;
-  NIFramesContext *out_ni_frames_ctx;
-  NIFramesContext *in_ni_frames_ctx;
-
-  /*
-   * Clone the incoming hardware frame context to the output
-   * frame context including its internal data. This should really
-   * be set up by the ni_frames_init() hwcontext driver.
-   */
-
-  out_frames_hwctx = out_frames_ctx->hwctx;
-  in_frames_hwctx = in_frames_ctx->hwctx;
-
-  memcpy(out_frames_ctx->internal->priv,
-         in_frames_ctx->internal->priv, sizeof(NIFramesContext));
-
-  memcpy(out_frames_hwctx,in_frames_hwctx, sizeof(AVNIFramesContext));
-
-  in_ni_frames_ctx = in_frames_ctx->internal->priv;
-  out_ni_frames_ctx = out_frames_ctx->internal->priv;
-
-  // When cloning the hw frame context, the split context of a super frame
-  // no longer applies so disable it here. The outgoing hw frames context
-  // of a filter never propagates super frames.
-  out_ni_frames_ctx->split_ctx.enabled = 0;
-
-  if (ctx)
-  {
-      ni_device_session_copy(ctx, &out_ni_frames_ctx->api_ctx);
-  }
-  else
-  {
-      ni_device_session_copy(&in_ni_frames_ctx->api_ctx,
-                             &out_ni_frames_ctx->api_ctx);
-  }
-
 }
 
 void ff_ni_set_bit_depth_and_encoding_type(int8_t *p_bit_depth,

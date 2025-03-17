@@ -50,6 +50,52 @@
 #define OFFSETENC(x) offsetof(XCoderH265EncContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 
+// Define a macro to conditionally include "gen_global_headers" based on an argument
+#define NI_ENC_OPTIONS\
+    { "xcoder", "Select which XCoder card to use.", OFFSETENC(dev_xcoder), \
+      AV_OPT_TYPE_STRING, { .str = NI_BEST_MODEL_LOAD_STR }, CHAR_MIN, CHAR_MAX, VE, "xcoder" }, \
+    { "bestmodelload", "Pick the least model load XCoder/encoder available.", 0, AV_OPT_TYPE_CONST, \
+          { .str = NI_BEST_MODEL_LOAD_STR }, 0, 0, VE, "xcoder" }, \
+    { "bestload", "Pick the least real load XCoder/encoder available.", 0, AV_OPT_TYPE_CONST, \
+          { .str = NI_BEST_REAL_LOAD_STR }, 0, 0, VE, "xcoder" }, \
+    \
+    { "enc", "Select which encoder to use by index. First is 0, second is 1, and so on.", \
+      OFFSETENC(dev_enc_idx), AV_OPT_TYPE_INT, { .i64 = BEST_DEVICE_LOAD }, -1, INT_MAX, VE }, \
+    \
+    { "ni_enc_idx", "Select which encoder to use by index. First is 0, second is 1, and so on.", \
+      OFFSETENC(dev_enc_idx), AV_OPT_TYPE_INT, { .i64 = BEST_DEVICE_LOAD }, -1, INT_MAX, VE }, \
+    \
+    { "ni_enc_name", "Select which encoder to use by NVMe block device name, e.g. /dev/nvme0n1.", \
+      OFFSETENC(dev_blk_name), AV_OPT_TYPE_STRING, { 0 }, 0, 0, VE }, \
+    \
+    { "encname", "Select which encoder to use by NVMe block device name, e.g. /dev/nvme0n1.", \
+      OFFSETENC(dev_blk_name), AV_OPT_TYPE_STRING, { 0 }, 0, 0, VE }, \
+    \
+    { "iosize", "Specify a custom NVMe IO transfer size (multiples of 4096 only).", \
+      OFFSETENC(nvme_io_size), AV_OPT_TYPE_INT, { .i64 = BEST_DEVICE_LOAD }, -1, INT_MAX, VE }, \
+    \
+    { "xcoder-params", "Set the XCoder configuration using a :-separated list of key=value parameters.", \
+      OFFSETENC(xcoder_opts), AV_OPT_TYPE_STRING, { 0 }, 0, 0, VE }, \
+    \
+    { "xcoder-gop", "Set the XCoder custom gop using a :-separated list of key=value parameters.", \
+      OFFSETENC(xcoder_gop), AV_OPT_TYPE_STRING, { 0 }, 0, 0, VE }, \
+    \
+    { "keep_alive_timeout", "Specify a custom session keep alive timeout in seconds.", \
+      OFFSETENC(keep_alive_timeout), AV_OPT_TYPE_INT, { .i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT }, \
+      NI_MIN_KEEP_ALIVE_TIMEOUT, NI_MAX_KEEP_ALIVE_TIMEOUT, VE },
+
+// Define a macro for the "gen_global_headers" options
+#define NI_ENC_OPTION_GEN_GLOBAL_HEADERS \
+    { "gen_global_headers", "Generate SPS and PPS headers during codec initialization.", \
+      OFFSETENC(gen_global_headers), AV_OPT_TYPE_INT, { .i64 = GEN_GLOBAL_HEADERS_OFF }, \
+      GEN_GLOBAL_HEADERS_AUTO, GEN_GLOBAL_HEADERS_ON, VE, "gen_global_headers" }, \
+    {     "auto", NULL, 0, AV_OPT_TYPE_CONST, \
+          { .i64 = GEN_GLOBAL_HEADERS_AUTO }, 0, 0, VE, "gen_global_headers" }, \
+    {     "off", NULL, 0, AV_OPT_TYPE_CONST, \
+          { .i64 = GEN_GLOBAL_HEADERS_OFF }, 0, 0, VE, "gen_global_headers" }, \
+    {     "on", NULL, 0, AV_OPT_TYPE_CONST, \
+          { .i64 = GEN_GLOBAL_HEADERS_ON }, 0, 0, VE, "gen_global_headers" },
+
 int xcoder_encode_init(AVCodecContext *avctx);
 
 int xcoder_encode_close(AVCodecContext *avctx);

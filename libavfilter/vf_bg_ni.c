@@ -630,7 +630,9 @@ static int nibg_config_output(AVFilterLink *outlink, AVFrame *in)
 
     out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
 
-    ff_ni_clone_hwframe_ctx(in_frames_ctx, out_frames_ctx, &s->ai_ctx->api_ctx);
+    AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+    ni_cpy_hwframe_ctx(in_frames_ctx, out_frames_ctx);
+    ni_device_session_copy(&s->ai_ctx->api_ctx, &out_ni_ctx->api_ctx);
 
     out_frames_ctx->format            = AV_PIX_FMT_NI_QUAD;
     out_frames_ctx->width             = outlink->w;
@@ -1358,9 +1360,11 @@ static int nibg_filter_frame(AVFilterLink *link, AVFrame *in)
         }
 #endif
 
-        ff_ni_clone_hwframe_ctx((AVHWFramesContext *)in->hw_frames_ctx->data, 
-                                (AVHWFramesContext *)s->out_frames_ref->data,
-                                &s->ai_ctx->api_ctx);
+        AVHWFramesContext *in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
+        AVHWFramesContext *out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
+        AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+        ni_cpy_hwframe_ctx(in_frames_ctx, out_frames_ctx);
+        ni_device_session_copy(&s->ai_ctx->api_ctx, &out_ni_ctx->api_ctx);
 
         s->initialized = 1;
     }

@@ -471,12 +471,6 @@ static int query_formats(AVFilterGraph *graph, void *log_ctx)
     for (i = 0; i < graph->nb_filters; i++) {
         AVFilterContext *filter = graph->filters[i];
 
-        // NETINT: skip format conversion check for ni_quadra_overlay and ni_quadra_xstack
-        if (strstr(filter->name, "ni_quadra_overlay") || strstr(filter->name, "ni_quadra_xstack")) {
-            // skip format conversion check
-            continue;
-        }
-
         for (j = 0; j < filter->nb_inputs; j++) {
             AVFilterLink *link = filter->inputs[j];
             const AVFilterNegotiation *neg;

@@ -54,12 +54,6 @@ typedef struct HWContextType {
      */
     size_t             frames_hwctx_size;
 
-    /**NETINT
-     * size of the private data, i.e.
-     * AVHWFramesInternal.priv
-     */
-    size_t             frames_priv_size;
-
     int              (*device_create)(AVHWDeviceContext *ctx, const char *device,
                                       AVDictionary *opts, int flags);
     int              (*device_derive)(AVHWDeviceContext *dst_ctx,
@@ -103,8 +97,6 @@ typedef struct FFHWFramesContext {
     AVHWFramesContext p;
 
     const HWContextType *hw_type;
-    //NETINT
-    void                *priv;
 
     AVBufferPool *pool_internal;
 
@@ -167,7 +159,6 @@ extern const HWContextType ff_hwcontext_type_dxva2;
 extern const HWContextType ff_hwcontext_type_opencl;
 extern const HWContextType ff_hwcontext_type_qsv;
 extern const HWContextType ff_hwcontext_type_vaapi;
-extern const HWContextType ff_hwcontext_type_ni_logan;
 extern const HWContextType ff_hwcontext_type_ni_quadra;
 extern const HWContextType ff_hwcontext_type_vdpau;
 extern const HWContextType ff_hwcontext_type_videotoolbox;

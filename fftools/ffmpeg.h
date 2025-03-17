@@ -82,7 +82,6 @@ enum HWAccelID {
     HWACCEL_NONE = 0,
     HWACCEL_AUTO,
     HWACCEL_GENERIC,
-    HWACCEL_NI_LOGAN,
     HWACCEL_NI_QUADRA
 };
 
@@ -815,10 +814,6 @@ void enc_stats_write(OutputStream *ost, EncStats *es,
 
 #if CONFIG_NI_QUADRA
 int ni_quad_init(AVCodecContext *s);
-#endif
-
-#if CONFIG_NI_LOGAN
-int ni_logan_init(AVCodecContext *s);
 #endif
 
 HWDevice *hw_device_get_by_name(const char *name);

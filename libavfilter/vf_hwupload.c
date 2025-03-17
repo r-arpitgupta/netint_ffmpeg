@@ -28,7 +28,7 @@
 #include "formats.h"
 #include "video.h"
 
-#if CONFIG_NI_QUADRA || CONFIG_NI_LOGAN
+#if CONFIG_NI_QUADRA 
 #include "nifilter.h"
 #endif
 
@@ -239,7 +239,7 @@ static int activate(AVFilterContext *ctx)
     AVFrame *frame = NULL;
     int ret;    
 
-#if CONFIG_NI_QUADRA || CONFIG_NI_LOGAN
+#if CONFIG_NI_QUADRA 
     HWUploadContext *hwctx = ctx->priv;
     ret = 0;
     AVHWFramesContext *hwfc;
@@ -251,7 +251,7 @@ static int activate(AVFilterContext *ctx)
     }
     hwfc = (AVHWFramesContext *)li->hw_frames_ctx->data;
 
-    NIFramesContext *ni_ctx = hwfc->internal->priv;
+    AVNIFramesContext *ni_ctx = (AVNIFramesContext*) hwfc->hwctx;
 
     const char *type_name = hwctx && hwctx->hwframes && hwctx->hwframes->device_ctx
         ? av_hwdevice_get_type_name(hwctx->hwframes->device_ctx->type)

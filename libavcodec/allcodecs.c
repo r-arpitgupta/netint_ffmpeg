@@ -838,11 +838,6 @@ extern const FFCodec ff_h264_ni_quadra_encoder;
 extern const FFCodec ff_h265_ni_quadra_encoder;
 extern const FFCodec ff_av1_ni_quadra_encoder;
 extern const FFCodec ff_jpeg_ni_quadra_encoder;
-// NETINT: ni logan codecs must be added after all quadra codecs added
-extern const FFCodec ff_h264_ni_logan_decoder;
-extern const FFCodec ff_h265_ni_logan_decoder;
-extern const FFCodec ff_h264_ni_logan_encoder;
-extern const FFCodec ff_h265_ni_logan_encoder;
 extern const FFCodec ff_av1_decoder;
 extern const FFCodec ff_av1_cuvid_decoder;
 extern const FFCodec ff_av1_mediacodec_decoder;

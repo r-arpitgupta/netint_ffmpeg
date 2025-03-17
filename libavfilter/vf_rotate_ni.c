@@ -546,8 +546,10 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
             goto FAIL;
         }
 
-        ff_ni_clone_hwframe_ctx(in_frames_context, (AVHWFramesContext *)out_buffer_ref->data,
-                                &rot->api_ctx);
+        AVHWFramesContext *out_frames_ctx = (AVHWFramesContext *)out_buffer_ref->data;
+        AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+        ni_cpy_hwframe_ctx(in_frames_context, out_frames_ctx);
+        ni_device_session_copy(&rot->api_ctx, &out_ni_ctx->api_ctx);
 
         if (in->color_range == AVCOL_RANGE_JPEG)
         {

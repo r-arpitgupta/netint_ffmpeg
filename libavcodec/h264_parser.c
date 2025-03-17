@@ -277,9 +277,6 @@ static inline int parse_nal_units(AVCodecParserContext *s,
     ff_h264_sei_uninit(&p->sei);
     p->sei.common.frame_packing.arrangement_cancel_flag = -1;
     p->sei.common.unregistered.x264_build = -1;
-#if CONFIG_NI_LOGAN
-    p->sei.ni_custom.type = -1;
-#endif
 
     if (!buf_size)
         return 0;

@@ -761,11 +761,10 @@ static int packet_decode(DecoderPriv *dp, AVPacket *pkt, AVFrame *frame)
             av_log(dp, AV_LOG_ERROR, "Decoding error: %s\n", av_err2str(ret));
             dp->dec.decode_errors++;
 
-            // NETINT: when ret < 0, exit (instead of continue) to avoid deadloop
-            // if (exit_on_error)
-            return ret;
+            if (exit_on_error)
+                return ret;
 
-            // continue;
+            continue;
         }
 
         if (frame->decode_error_flags || (frame->flags & AV_FRAME_FLAG_CORRUPT)) {
@@ -828,18 +827,6 @@ static int packet_decode(DecoderPriv *dp, AVPacket *pkt, AVFrame *frame)
             }
         }
     }
-}
-
-// NETINT: Recognize whether the codec is one of NI Quadra hardware
-static inline int is_ni_quadra_hardware_decoder(const char* codec_name)
-{
-    int ret =
-        !strncmp(codec_name, "h264_ni_quadra", strlen("h264_ni_quadra")) ||
-        !strncmp(codec_name, "h265_ni_quadra", strlen("h265_ni_quadra")) ||
-        !strncmp(codec_name, "jpeg_ni_quadra", strlen("jpeg_ni_quadra")) ||
-        !strncmp(codec_name, "vp9_ni_quadra", strlen("vp9_ni_quadra"));
-
-    return ret;
 }
 
 static int dec_open(DecoderPriv *dp, AVDictionary **dec_opts,
@@ -1585,24 +1572,6 @@ static int dec_open(DecoderPriv *dp, AVDictionary **dec_opts,
 
     if (!av_dict_get(*dec_opts, "threads", NULL, 0))
         av_dict_set(dec_opts, "threads", "auto", 0);
-
-    // NETINT: automatically set maxExtraHwFrameCnt for NI Quadra hardware decoders
-    AVDictionaryEntry *t;
-    if (is_ni_quadra_hardware_decoder(codec->name) &&
-        (t = av_dict_get(*dec_opts, "xcoder-params", NULL, 0))) {
-        if (strstr(t->value, "out=hw")) {
-            int i;
-            size_t len = strlen(t->value);
-            // Remove all colons if exist at the end of option values before appending
-            for(i=len-1; i>0; i--) {
-                if(t->value[i] == ':')
-                    t->value[i] = '\0';
-                else
-                    break;
-            }
-            av_dict_set(dec_opts, "xcoder-params", ":maxExtraHwFrameCnt=0", AV_DICT_APPEND);
-        }
-    }
 
     ret = hw_device_setup_for_decode(dp, codec, o->hwaccel_device);
     if (ret < 0) {

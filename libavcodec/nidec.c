@@ -358,6 +358,11 @@ int xcoder_decode_init(AVCodecContext *avctx)
   {
     s->api_ctx.hw_action = NI_CODEC_HW_NONE;
   }
+
+#if ((LIBAVCODEC_VERSION_MAJOR > 61) || (LIBAVCODEC_VERSION_MAJOR == 61 && LIBAVCODEC_VERSION_MINOR >= 19))
+  if (p_param->dec_input_params.hwframes && p_param->dec_input_params.max_extra_hwframe_cnt == 255)
+      p_param->dec_input_params.max_extra_hwframe_cnt = 0;
+#endif
   //------reassign pix format based on user param done--------//
 
   if (s->custom_sei_type == USER_DATA_UNREGISTERED_SEI_PAYLOAD_TYPE ||

@@ -1370,9 +1370,6 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
         return AVERROR(ENOMEM);
 
     out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
-
-    // ff_ni_clone_hwframe_ctx(in_frames_ctx, out_frames_ctx, NULL);
-
     out_frames_ctx->format            = AV_PIX_FMT_NI_QUAD;
     out_frames_ctx->width             = outlink->w;
     out_frames_ctx->height            = outlink->h;
@@ -2455,7 +2452,7 @@ static int init_hwframe_uploader(AVFilterContext *ctx, NIDrawTextContext *s,
     AVHWFramesContext *out_frames_ctx;
     AVHWFramesContext *main_frame_ctx;
     AVNIDeviceContext *pAVNIDevCtx;
-    NIFramesContext *ni_ctx,*ni_ctx_output;
+    AVNIFramesContext *f_hwctx, *f_hwctx_output;
     int cardno   = ni_get_cardno(frame);
     char buf[64] = {0};
 
@@ -2493,10 +2490,10 @@ static int init_hwframe_uploader(AVFilterContext *ctx, NIDrawTextContext *s,
     }
 
     // Work around a hwdownload session start timestamp issue
-    ni_ctx        = (NIFramesContext *)hwframe_ctx->internal->priv;
-    ni_ctx_output = (NIFramesContext *)out_frames_ctx->internal->priv;
-    ni_ctx_output->api_ctx.session_timestamp =
-        ni_ctx->api_ctx.session_timestamp;
+    f_hwctx        = (AVNIFramesContext*) hwframe_ctx->hwctx;
+    f_hwctx_output = (AVNIFramesContext*) out_frames_ctx->hwctx;
+    f_hwctx_output->api_ctx.session_timestamp =
+        f_hwctx->api_ctx.session_timestamp;
 
     s->hw_frames_ctx = av_buffer_ref(s->hwframe);
     if (!s->hw_frames_ctx)
@@ -2533,9 +2530,8 @@ static int init_hwframe_uploader(AVFilterContext *ctx, NIDrawTextContext *s,
 
     s->session_opened = 1;
 
-    ff_ni_clone_hwframe_ctx(main_frame_ctx,
-                            (AVHWFramesContext *)s->out_frames_ref->data,
-                            &s->api_ctx);
+    ni_cpy_hwframe_ctx(main_frame_ctx, out_frames_ctx);
+    ni_device_session_copy(&s->api_ctx, &f_hwctx_output->api_ctx);
 #if IS_FFMPEG_70_AND_ABOVE
     s->buffer_limit = 1;
 #endif
@@ -3493,16 +3489,13 @@ static int activate(AVFilterContext *ctx)
     AVFilterLink  *outlink = ctx->outputs[0];
     AVFrame *frame = NULL;
     int ret = 0;
-#if 0
     NIDrawTextContext *s = inlink->dst->priv;
-#endif
 
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
     if (ff_inlink_check_available_frame(inlink))
     {
-#if 0
         if (s->initialized)
         {
             ret = ni_device_session_query_buffer_avail(&s->api_ctx, NI_DEVICE_TYPE_SCALER);
@@ -3518,7 +3511,7 @@ static int activate(AVFilterContext *ctx)
                 __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
             return FFERROR_NOT_READY;
         }
-#endif
+
         ret = ff_inlink_consume_frame(inlink, &frame);
         if (ret < 0)
             return ret;
