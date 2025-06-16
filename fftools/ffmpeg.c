@@ -605,7 +605,7 @@ static void print_report(int is_last_report, int64_t timer_start, int64_t cur_ti
             } else { // else, use default FFmpeg default fps calculation
                 fps = t > 1 ? frame_number / t : 0;
             }
- 
+
             // NETINT: add option to display windowed average FPS
             // in addition to default behavior, display 1 decimal place in FPS if ni_interval_fps selected
             av_bprintf(&buf, "frame=%5"PRId64" fps=%3.*f q=%3.1f ",

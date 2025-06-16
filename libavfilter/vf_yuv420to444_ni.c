@@ -43,15 +43,7 @@
     ((LIBAVFILTER_VERSION_MAJOR > 6) ||                                        \
      (LIBAVFILTER_VERSION_MAJOR == 6 && LIBAVFILTER_VERSION_MINOR >= 107))
 
-#if !IS_FFMPEG_342_AND_ABOVE
-enum EOFAction {
-    EOF_ACTION_REPEAT,
-    EOF_ACTION_ENDALL,
-    EOF_ACTION_PASS
-};
-#endif
-
-typedef struct YUVTransContext {
+typedef struct NetIntYUV420to444Context {
     const AVClass *class;
     FFFrameSync fs;
     int mode;
@@ -60,14 +52,9 @@ typedef struct YUVTransContext {
     int opt_shortest;
     int opt_eof_action;
 #endif
-} YUVTransContext;
+} NetIntYUV420to444Context;
 
-static av_cold void uninit(AVFilterContext *ctx)
-{
-    YUVTransContext *s = ctx->priv;
-
-    ff_framesync_uninit(&s->fs);
-}
+static int do_blend(FFFrameSync *fs);
 
 static int query_formats(AVFilterContext *ctx)
 {
@@ -114,10 +101,27 @@ static int query_formats(AVFilterContext *ctx)
     return 0;
 }
 
+static av_cold int init(AVFilterContext *ctx)
+{
+    NetIntYUV420to444Context *s = ctx->priv;
+
+    s->fs.on_event = do_blend;
+    s->fs.opaque = s;
+
+    return 0;
+}
+
+static av_cold void uninit(AVFilterContext *ctx)
+{
+    NetIntYUV420to444Context *s = ctx->priv;
+
+    ff_framesync_uninit(&s->fs);
+}
+
 static int config_output(AVFilterLink *outlink)
 {
     AVFilterContext *ctx = outlink->src;
-    YUVTransContext *s = ctx->priv;
+    NetIntYUV420to444Context *s = ctx->priv;
     int i, ret;
 
     ret = ff_framesync_init(&s->fs, ctx, ctx->nb_inputs);
@@ -131,7 +135,7 @@ static int config_output(AVFilterLink *outlink)
         in->sync      = i ? 1 : 2;
         in->time_base = ctx->inputs[i]->time_base;
     }
- 
+
     outlink->w = ctx->inputs[0]->w;
     outlink->h = ctx->inputs[0]->h;
     outlink->format = AV_PIX_FMT_YUV444P;
@@ -166,7 +170,7 @@ static int config_output(AVFilterLink *outlink)
 static int do_blend(FFFrameSync *fs)
 {
     AVFilterContext *ctx = fs->parent;
-    YUVTransContext *trans_ctx = ctx->priv;
+    NetIntYUV420to444Context *s = ctx->priv;
     AVFrame *mainpic, *second, *out;
     int uv_420_linesize, uv_444_linesize;
     int i, j;
@@ -189,69 +193,69 @@ static int do_blend(FFFrameSync *fs)
         uv_420_linesize = mainpic->linesize[1];
         uv_444_linesize = out->linesize[1];
 
-        //y compnent
+        //y component
         for (i = 0; i < out->height; i++) {
             memcpy(out->data[0] + i * out->linesize[0],
                    mainpic->data[0] + i * mainpic->linesize[0],
                    out->linesize[0]);
         }
 
-        if (trans_ctx->mode == 0) {
-            //u compnent
+        if (s->mode == 0) {
+            //u component
             for (i = 0; i < out->height; i++) {
                 memcpy(out->data[1] + i * out->linesize[0],
                        second->data[0] + i * second->linesize[0],
                        out->linesize[0]);
             }
 
-            //v compnent
+            //v component
             for (i = 0; i < out->height / 2; i++) {
                 for (j = 0; j < out->width / 2; j++) {
                     memcpy(out->data[2] + (2 * i * uv_444_linesize) + 2 * j,
                            mainpic->data[1] + i * uv_420_linesize + j,
                            sizeof(char));
                     memcpy(out->data[2] + 2 * (i * uv_444_linesize) +
-                               (2 * j + 1),
+                           (2 * j + 1),
                            mainpic->data[2] + i * uv_420_linesize + j,
                            sizeof(char));
                     memcpy(out->data[2] + ((2 * i + 1) * uv_444_linesize) +
-                               2 * j,
+                           2 * j,
                            second->data[1] + i * uv_420_linesize + j,
                            sizeof(char));
                     memcpy(out->data[2] + ((2 * i + 1) * uv_444_linesize) +
-                               (2 * j + 1),
+                           (2 * j + 1),
                            second->data[2] + i * uv_420_linesize + j,
                            sizeof(char));
                 }
             }
-        } else if (trans_ctx->mode == 1) {
-            // uv compnent
+        } else if (s->mode == 1) {
+            // uv component
             for (i = 0; i < out->height / 2; i++) {
                 for (j = 0; j < out->width / 2; j++) {
                     memcpy(out->data[1] + (2 * i * uv_444_linesize) + 2 * j,
                            mainpic->data[1] + i * uv_420_linesize + j,
                            sizeof(char));
                     memcpy(out->data[1] + (2 * i * uv_444_linesize) +
-                               (2 * j + 1),
+                           (2 * j + 1),
                            second->data[1] + i * uv_420_linesize + j,
                            sizeof(char));
                     memcpy(out->data[1] + ((2 * i + 1) * uv_444_linesize) +
-                               2 * j,
+                           2 * j,
                            second->data[0] + 2 * i * uv_444_linesize +
-                               2 * j,
+                           2 * j,
                            sizeof(char) * 2);
 
                     memcpy(out->data[2] + (2 * i * uv_444_linesize) + 2 * j,
                            mainpic->data[2] + i * uv_420_linesize + j,
                            sizeof(char));
                     memcpy(out->data[2] + 2 * (i * uv_444_linesize) +
-                               (2 * j + 1),
+                           (2 * j + 1),
                            second->data[2] + i * uv_420_linesize + j,
                            sizeof(char));
                     memcpy(out->data[2] + ((2 * i + 1) * uv_444_linesize) +
-                               2 * j,
+                           2 * j,
                            second->data[0] + (2 * i + 1) * uv_444_linesize +
-                               2 * j,
+                           2 * j,
                            sizeof(char) * 2);
                 }
             }
@@ -261,115 +265,55 @@ static int do_blend(FFFrameSync *fs)
     return ff_filter_frame(ctx->outputs[0], out);
 }
 
-static av_cold int init(AVFilterContext *ctx)
-{
-    YUVTransContext *s = ctx->priv;
-
-    s->fs.on_event = do_blend;
-    s->fs.opaque = s;
-
-    return 0;
-}
-
-#if IS_FFMPEG_342_AND_ABOVE
-static int activate(AVFilterContext *ctx)
-{
-    YUVTransContext *s = ctx->priv;
-    return ff_framesync_activate(&s->fs);
-}
-#else
+#if !IS_FFMPEG_342_AND_ABOVE
 static int filter_frame(AVFilterLink *inlink, AVFrame *inpicref)
 {
-    YUVTransContext *s = inlink->dst->priv;
+    NetIntYUV420to444Context *s = inlink->dst->priv;
     av_log(inlink->dst, AV_LOG_DEBUG, "Incoming frame (time:%s) from link #%d\n", av_ts2timestr(inpicref->pts, &inlink->time_base), FF_INLINK_IDX(inlink));
     return ff_framesync_filter_frame(&s->fs, inlink, inpicref);
 }
 
 static int request_frame(AVFilterLink *outlink)
 {
-    YUVTransContext *s = outlink->src->priv;
+    NetIntYUV420to444Context *s = outlink->src->priv;
     return ff_framesync_request_frame(&s->fs, outlink);
+}
+#else
+static int activate(AVFilterContext *ctx)
+{
+    NetIntYUV420to444Context *s = ctx->priv;
+    return ff_framesync_activate(&s->fs);
 }
 #endif
 
-#define OFFSET(x) offsetof(YUVTransContext, x)
+#define OFFSET(x) offsetof(NetIntYUV420to444Context, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_FILTERING_PARAM)
 
-static const AVOption YUVTrans_options[] = {
-    {"mode",
-     "filter mode 0 have better PSNR 1 can decode as 420.",
-     OFFSET(mode),
-     AV_OPT_TYPE_INT,
-     {.i64 = 0},
-     0,
-     1,
-     FLAGS,
-     "mode"},
-#if !IS_FFMPEG_342_AND_ABOVE
-    {"eof_action",
-     "Action to take when encountering EOF from secondary input ",
-     OFFSET(opt_eof_action),
-     AV_OPT_TYPE_INT,
-     { .i64 = EOF_ACTION_REPEAT },
-     EOF_ACTION_REPEAT,
-     EOF_ACTION_PASS,
-     FLAGS},
-        {"repeat",
-         "Repeat the previous frame.",
-         0,
-         AV_OPT_TYPE_CONST,
-         { .i64 = EOF_ACTION_REPEAT },
-         FLAGS},
-        {"endall",
-         "End both streams.",
-         0,
-         AV_OPT_TYPE_CONST,
-         { .i64 = EOF_ACTION_ENDALL },
-         FLAGS},
-        {"pass",
-         "Pass through the main input.",
-         0,
-         AV_OPT_TYPE_CONST,
-         { .i64 = EOF_ACTION_PASS },
-         FLAGS},
-    {"shortest",
-     "force termination when the shortest input terminates",
-     OFFSET(opt_shortest),
-     AV_OPT_TYPE_BOOL,
-     { .i64 = 0 },
-     0,
-     1,
-     FLAGS},
-    {"repeatlast",
-     "extend last frame of secondary streams beyond EOF",
-     OFFSET(opt_repeatlast),
-     AV_OPT_TYPE_BOOL,
-     { .i64 = 1 },
-     0,
-     1,
-     FLAGS},
-#endif
-    {NULL}
+static const AVOption ni_420to444_options[] = {
+    { "mode", "mode used by input yuv444to420 filter", OFFSET(mode), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS, "mode" },
+        { "better_psnr",       "better PSNR after encoding and recombination", 0, AV_OPT_TYPE_CONST, {.i64 = 0}, 0, 0, FLAGS, "mode" },
+        { "visually_coherent", "output0 will be visually coherent as yuv420",  0, AV_OPT_TYPE_CONST, {.i64 = 1}, 0, 0, FLAGS, "mode" },
+    { NULL }
 };
 
 #if IS_FFMPEG_342_AND_ABOVE
 // NOLINTNEXTLINE(clang-diagnostic-deprecated-declarations)
-FRAMESYNC_DEFINE_CLASS(YUVTrans, YUVTransContext, fs);
+FRAMESYNC_DEFINE_CLASS(ni_420to444, NetIntYUV420to444Context, fs);
 #else
-AVFILTER_DEFINE_CLASS(YUVTrans);
+AVFILTER_DEFINE_CLASS(ni_420to444);
 #endif
 
-static const AVFilterPad avfilter_vf_YUVTrans_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
-        .name         = "input0",
-        .type         = AVMEDIA_TYPE_VIDEO,
+        .name          = "input0",
+        .type          = AVMEDIA_TYPE_VIDEO,
 #if !IS_FFMPEG_342_AND_ABOVE
         .filter_frame  = filter_frame,
 #endif
     },
     {
-        .name         = "input1",
-        .type         = AVMEDIA_TYPE_VIDEO,
+        .name          = "input1",
+        .type          = AVMEDIA_TYPE_VIDEO,
 #if !IS_FFMPEG_342_AND_ABOVE
         .filter_frame  = filter_frame,
 #endif
@@ -379,11 +323,11 @@ static const AVFilterPad avfilter_vf_YUVTrans_inputs[] = {
 #endif
 };
 
-static const AVFilterPad avfilter_vf_YUVTrans_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
-        .name          = "default",
-        .type          = AVMEDIA_TYPE_VIDEO,
-        .config_props  = config_output,
+        .name           = "default",
+        .type           = AVMEDIA_TYPE_VIDEO,
+        .config_props   = config_output,
 #if !IS_FFMPEG_342_AND_ABOVE
         .request_frame  = request_frame,
 #endif
@@ -398,19 +342,19 @@ AVFilter ff_vf_yuv420to444_ni_quadra = {
     .description   = NULL_IF_CONFIG_SMALL("NETINT Quadra YUV420 to YUV444."),
     .init          = init,
     .uninit        = uninit,
-    .priv_size     = sizeof(YUVTransContext),
-    .priv_class    = &YUVTrans_class,
+    .priv_size     = sizeof(NetIntYUV420to444Context),
+    .priv_class    = &ni_420to444_class,
 #if IS_FFMPEG_342_AND_ABOVE
-    .preinit       = YUVTrans_framesync_preinit,
+    .preinit       = ni_420to444_framesync_preinit,
     .activate      = activate,
 #endif
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
-    FILTER_INPUTS(avfilter_vf_YUVTrans_inputs),
-    FILTER_OUTPUTS(avfilter_vf_YUVTrans_outputs),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
     FILTER_QUERY_FUNC(query_formats),
 #else
-    .inputs        = avfilter_vf_YUVTrans_inputs,
-    .outputs       = avfilter_vf_YUVTrans_outputs,
+    .inputs        = inputs,
+    .outputs       = outputs,
     .query_formats = query_formats,
 #endif
     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL |

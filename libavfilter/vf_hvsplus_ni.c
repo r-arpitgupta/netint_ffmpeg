@@ -55,31 +55,29 @@
 
 #define NI_NUM_FRAMES_IN_QUEUE 8
 
-#define NI_HVSPLUS_KEEPALIVE_TIMEOUT 10
-
 // hvsplus related definition
 typedef struct _ni_hvsplus_network_layer {
-   int32_t width;
-   int32_t height;
-   int32_t channel;
-   int32_t classes;
-   int32_t component;
-   int32_t output_number;
-   float *output;
+    int32_t width;
+    int32_t height;
+    int32_t channel;
+    int32_t classes;
+    int32_t component;
+    int32_t output_number;
+    float *output;
 } ni_hvsplus_network_layer_t;
 
 typedef struct _ni_hvsplus_nbsize {
-   int32_t width;
-   int32_t height;
+    int32_t width;
+    int32_t height;
 } ni_hvsplus_nbsize_t;
 
 typedef struct _ni_hvsplus_network {
-   int32_t netw;
-   int32_t neth;
-   int32_t net_out_w;
-   int32_t net_out_h;
-   ni_network_data_t raw;
-   ni_hvsplus_network_layer_t *layers;
+    int32_t netw;
+    int32_t neth;
+    int32_t net_out_w;
+    int32_t net_out_h;
+    ni_network_data_t raw;
+    ni_hvsplus_network_layer_t *layers;
 } ni_hvsplus_network_t;
 
 typedef struct HwPadContext {
@@ -94,37 +92,38 @@ typedef struct HwCropContext {
 } HwCropContext;
 
 typedef struct AiContext {
-   ni_session_context_t api_ctx;
-   ni_session_data_io_t api_src_frame;
-   ni_session_data_io_t api_dst_frame;
+    ni_session_context_t api_ctx;
+    ni_session_data_io_t api_src_frame;
+    ni_session_data_io_t api_dst_frame;
 } AiContext;
 
 typedef struct NetIntHvsplusContext {
-   const AVClass *class;
-   int level;
-   int initialized;
-   int devid;
-   int in_width, in_height;
-   int out_width, out_height;
-   int nb_width, nb_height;
-   int need_padding;
+    const AVClass *class;
+    int level;
+    int initialized;
+    int devid;
+    int in_width, in_height;
+    int out_width, out_height;
+    int nb_width, nb_height;
+    int need_padding;
 
-   AiContext *ai_ctx;
-   AVBufferRef *out_frames_ref;
-   HwPadContext *hwp_ctx;
-   HwCropContext *hwc_ctx;
+    AiContext *ai_ctx;
+    AVBufferRef *out_frames_ref;
+    HwPadContext *hwp_ctx;
+    HwCropContext *hwc_ctx;
 
-   ni_hvsplus_network_t network;
+    ni_hvsplus_network_t network;
 
-   int keep_alive_timeout; /* keep alive timeout setting */
-   int ai_timeout;
-   int channel_mode;
-   int buffer_limit;
+    int keep_alive_timeout; /* keep alive timeout setting */
+    int ai_timeout;
+    int channel_mode;
+    int buffer_limit;
 } NetIntHvsplusContext;
 
 static const ni_hvsplus_nbsize_t nbSizes[] = {
     {512, 288},
     {704, 396},
+    {720, 1280},
     {960, 540},
     {1280, 720},
     {1920, 1080},
@@ -133,7 +132,8 @@ static const ni_hvsplus_nbsize_t nbSizes[] = {
 
 // Find the smallest NB size that is equal to or larger than the input size
 // -1: not supported, 0: matched, >0: index of nbSize + 1
-static int findNBSize(int frameWidth, int frameHeight) {
+static int findNBSize(int frameWidth, int frameHeight)
+{
 
     int numSizes = sizeof(nbSizes) / sizeof(nbSizes[0]);
     int retval = -1;
@@ -144,8 +144,7 @@ static int findNBSize(int frameWidth, int frameHeight) {
             av_log(NULL, AV_LOG_INFO, "%s: matched w %d h %d\n", __func__, nbSizes[i].width, nbSizes[i].height);
             retval = 0;
             break;
-        }
-        else if (frameWidth <= nbSizes[i].width && frameHeight <= nbSizes[i].height) {
+        } else if (frameWidth <= nbSizes[i].width && frameHeight <= nbSizes[i].height) {
             av_log(NULL, AV_LOG_INFO, "%s: w %d h %d\n", __func__, nbSizes[i].width, nbSizes[i].height);
             retval = i+1;
             break;
@@ -154,7 +153,8 @@ static int findNBSize(int frameWidth, int frameHeight) {
     return retval;
 }
 
-static int ni_hvsplus_query_formats(AVFilterContext *ctx) {
+static int query_formats(AVFilterContext *ctx)
+{
     AVFilterFormats *formats;
 
     static const enum AVPixelFormat pix_fmts[] = {
@@ -165,14 +165,15 @@ static int ni_hvsplus_query_formats(AVFilterContext *ctx) {
         AV_PIX_FMT_NONE,
     };
 
-   formats = ff_make_format_list(pix_fmts);
-   if (!formats)
-       return AVERROR(ENOMEM);
+    formats = ff_make_format_list(pix_fmts);
+    if (!formats)
+        return AVERROR(ENOMEM);
 
     return ff_set_common_formats(ctx, formats);
 }
 
-static void cleanup_ai_context(AVFilterContext *ctx, NetIntHvsplusContext *s) {
+static void cleanup_ai_context(AVFilterContext *ctx, NetIntHvsplusContext *s)
+{
     ni_retcode_t retval;
     AiContext *ai_ctx = s->ai_ctx;
 
@@ -185,20 +186,16 @@ static void cleanup_ai_context(AVFilterContext *ctx, NetIntHvsplusContext *s) {
             av_log(ctx, AV_LOG_ERROR,
                     "Error: failed to close ai session. retval %d\n", retval);
         }
-        if (ai_ctx->api_ctx.hw_action != NI_CODEC_HW_ENABLE)
-        {
+        if (ai_ctx->api_ctx.hw_action != NI_CODEC_HW_ENABLE) {
 #ifdef _WIN32
-            if (ai_ctx->api_ctx.device_handle != NI_INVALID_DEVICE_HANDLE)
-            {
+            if (ai_ctx->api_ctx.device_handle != NI_INVALID_DEVICE_HANDLE) {
                 ni_device_close(ai_ctx->api_ctx.device_handle);
             }
 #elif __linux__
-            if (ai_ctx->api_ctx.device_handle != NI_INVALID_DEVICE_HANDLE)
-            {
+            if (ai_ctx->api_ctx.device_handle != NI_INVALID_DEVICE_HANDLE) {
                 ni_device_close(ai_ctx->api_ctx.device_handle);
             }
-            if (ai_ctx->api_ctx.blk_io_handle != NI_INVALID_DEVICE_HANDLE)
-            {
+            if (ai_ctx->api_ctx.blk_io_handle != NI_INVALID_DEVICE_HANDLE) {
                 ni_device_close(ai_ctx->api_ctx.blk_io_handle);
             }
 #endif
@@ -207,11 +204,211 @@ static void cleanup_ai_context(AVFilterContext *ctx, NetIntHvsplusContext *s) {
             ai_ctx->api_ctx.blk_io_handle = NI_INVALID_DEVICE_HANDLE;
         } else {
             ni_frame_buffer_free(&ai_ctx->api_dst_frame.data.frame);
-	}	
+        }
         ni_device_session_context_clear(&ai_ctx->api_ctx);
         av_free(ai_ctx);
         s->ai_ctx = NULL;
     }
+}
+
+
+static int init_ai_context(AVFilterContext *ctx, NetIntHvsplusContext *s,
+                           AVFrame *frame)
+{
+    ni_retcode_t retval;
+    AiContext *ai_ctx;
+    ni_hvsplus_network_t *network = &s->network;
+    int hwframe = frame->format == AV_PIX_FMT_NI_QUAD ? 1 : 0;
+    int ret;
+    AVHWFramesContext *pAVHFWCtx;
+    AVNIDeviceContext *pAVNIDevCtx;
+    AVHWFramesContext *out_frames_ctx;
+    AVNIFramesContext *f_hwctx;
+    int cardno;
+    int format;
+    int options;
+
+    av_log(ctx, AV_LOG_INFO, "%s: %d x %d format %s\n", __func__,
+           s->out_width, s->out_height, av_get_pix_fmt_name(frame->format));
+
+    ai_ctx = av_mallocz(sizeof(AiContext));
+    if (!ai_ctx) {
+        av_log(ctx, AV_LOG_ERROR, "Error: failed to allocate ai context\n");
+        return AVERROR(ENOMEM);
+    }
+    s->ai_ctx = ai_ctx;
+    retval = ni_device_session_context_init(&ai_ctx->api_ctx);
+    if (retval != NI_RETCODE_SUCCESS) {
+        av_log(ctx, AV_LOG_ERROR, "Error: ai session context init failure\n");
+        return AVERROR(EIO);
+    }
+
+    if (hwframe) {
+        pAVHFWCtx = (AVHWFramesContext*) frame->hw_frames_ctx->data;
+        pAVNIDevCtx = (AVNIDeviceContext*) pAVHFWCtx->device_ctx->hwctx;
+        cardno = ni_get_cardno(frame);
+
+        ai_ctx->api_ctx.device_handle = pAVNIDevCtx->cards[cardno];
+        ai_ctx->api_ctx.blk_io_handle = pAVNIDevCtx->cards[cardno];
+        ai_ctx->api_ctx.hw_action = NI_CODEC_HW_ENABLE;
+        ai_ctx->api_ctx.hw_id = cardno;
+    } else {
+        ai_ctx->api_ctx.hw_id = s->devid;
+    }
+
+    ai_ctx->api_ctx.device_type = NI_DEVICE_TYPE_AI;
+    ai_ctx->api_ctx.keep_alive_timeout = s->keep_alive_timeout;
+
+    retval = ni_device_session_open(&ai_ctx->api_ctx, NI_DEVICE_TYPE_AI);
+    if (retval != NI_RETCODE_SUCCESS) {
+        av_log(ctx, AV_LOG_ERROR, "Error: failed to open ai session. retval %d\n",
+                retval);
+        ret = AVERROR(EIO);
+        goto failed_out;
+    }
+
+    // Configure NB file
+    av_log(ctx, AV_LOG_DEBUG, "%s: out w %d h %d NB w %d h %d sw_format %s pixel_format %d\n", __func__,
+            s->out_width, s->out_height, s->nb_width, s->nb_height, av_get_pix_fmt_name(hwframe?pAVHFWCtx->sw_format:frame->format),
+            ai_ctx->api_ctx.pixel_format);
+
+    ai_ctx->api_ctx.active_video_width = s->nb_width;
+    ai_ctx->api_ctx.active_video_height = s->nb_height;
+    ai_ctx->api_ctx.hvsplus_level = s->level;
+    ai_ctx->api_ctx.pixel_format = ff_ni_ffmpeg_to_libxcoder_pix_fmt(
+            (hwframe ? pAVHFWCtx->sw_format : frame->format));
+
+    retval = ni_ai_config_hvsplus(&ai_ctx->api_ctx, &network->raw);
+
+    if (retval != NI_RETCODE_SUCCESS) {
+        av_log(ctx, AV_LOG_ERROR, "Error: failed to configure ai session. retval %d\n",
+                retval);
+        ret = AVERROR(EIO);
+        goto failed_out;
+    }
+
+    if (!hwframe) {
+        return 0;
+    }
+    out_frames_ctx = (AVHWFramesContext*) s->out_frames_ref->data;
+    f_hwctx = (AVNIFramesContext*) out_frames_ctx->hwctx;
+    f_hwctx->api_ctx.session_timestamp = ai_ctx->api_ctx.session_timestamp;
+
+    // Create frame pool
+    format = ff_ni_ffmpeg_to_gc620_pix_fmt(pAVHFWCtx->sw_format);
+    options = NI_AI_FLAG_IO | NI_AI_FLAG_PC;
+    if (s->buffer_limit)
+        options |= NI_AI_FLAG_LM;
+
+    /* Allocate a pool of frames by the AI */
+    retval = ni_device_alloc_frame(&ai_ctx->api_ctx, FFALIGN(s->nb_width, 2),
+            FFALIGN(s->nb_height, 2), format, options, 0, // rec width
+            0, // rec height
+            0, // rec X pos
+            0, // rec Y pos
+            8, // rgba color/pool size
+            0, // frame index
+            NI_DEVICE_TYPE_AI);
+    if (retval != NI_RETCODE_SUCCESS) {
+        av_log(ctx, AV_LOG_ERROR, "Error: failed to create buffer pool\n");
+        ret = AVERROR(ENOMEM);
+        goto failed_out;
+    }
+    retval = ni_frame_buffer_alloc_hwenc(&ai_ctx->api_dst_frame.data.frame,
+            FFALIGN(s->nb_width, 2), FFALIGN(s->nb_height, 2), 0);
+
+    if (retval != NI_RETCODE_SUCCESS) {
+        av_log(ctx, AV_LOG_ERROR, "Error: failed to allocate ni dst frame\n");
+        ret = AVERROR(ENOMEM);
+        goto failed_out;
+    }
+
+    return 0;
+
+    failed_out: cleanup_ai_context(ctx, s);
+    return ret;
+}
+
+static void ni_destroy_network(AVFilterContext *ctx,
+                               ni_hvsplus_network_t *network) {
+    if (network) {
+        int i;
+
+        if (network->layers) {
+            for (i = 0; i < network->raw.output_num; i++) {
+                if (network->layers[i].output) {
+                    free(network->layers[i].output);
+                    network->layers[i].output = NULL;
+                }
+            }
+
+            free(network->layers);
+            network->layers = NULL;
+        }
+    }
+}
+
+static int ni_create_network(AVFilterContext *ctx, ni_hvsplus_network_t *network)
+{
+    int ret;
+    int i;
+    ni_network_data_t *ni_network = &network->raw;
+
+    av_log(ctx, AV_LOG_INFO, "network input number %d, output number %d\n",
+          ni_network->input_num, ni_network->output_num);
+
+    if (ni_network->input_num == 0 || ni_network->output_num == 0) {
+        av_log(ctx, AV_LOG_ERROR, "Error: invalid network layer\n");
+        return AVERROR(EINVAL);
+    }
+
+    network->layers =
+        malloc(sizeof(ni_hvsplus_network_layer_t) * ni_network->output_num);
+    if (!network->layers) {
+        av_log(ctx, AV_LOG_ERROR, "Error: cannot allocate network layer memory\n");
+        return AVERROR(ENOMEM);
+    }
+    memset(network->layers, 0,
+          sizeof(ni_hvsplus_network_layer_t) * ni_network->output_num);
+
+    for (i = 0; i < ni_network->output_num; i++) {
+        network->layers[i].channel   = ni_network->linfo.out_param[i].sizes[0];
+        network->layers[i].width     = ni_network->linfo.out_param[i].sizes[1];
+        network->layers[i].height    = ni_network->linfo.out_param[i].sizes[2];
+        network->layers[i].component = 3;
+        network->layers[i].classes =
+            (network->layers[i].channel / network->layers[i].component) -
+            (4 + 1);
+        network->layers[i].output_number =
+            ni_ai_network_layer_dims(&ni_network->linfo.out_param[i]);
+        av_assert0(network->layers[i].output_number ==
+                   network->layers[i].width * network->layers[i].height *
+                   network->layers[i].channel);
+
+        network->layers[i].output =
+            malloc(network->layers[i].output_number * sizeof(float));
+        if (!network->layers[i].output) {
+            av_log(ctx, AV_LOG_ERROR,
+                   "Error: failed to allocate network layer %d output buffer\n", i);
+            ret = AVERROR(ENOMEM);
+            goto out;
+        }
+
+        av_log(ctx, AV_LOG_DEBUG, "%s: network layer %d: w %d, h %d, ch %d, co %d, cl %d\n", __func__, i,
+               network->layers[i].width, network->layers[i].height,
+               network->layers[i].channel, network->layers[i].component,
+               network->layers[i].classes);
+    }
+
+    network->netw = ni_network->linfo.in_param[0].sizes[1];
+    network->neth = ni_network->linfo.in_param[0].sizes[2];
+    network->net_out_w = ni_network->linfo.out_param[0].sizes[1];
+    network->net_out_h = ni_network->linfo.out_param[0].sizes[2];
+
+    return 0;
+out:
+    ni_destroy_network(ctx, network);
+    return ret;
 }
 
 static av_cold int init_hwframe_pad(AVFilterContext *ctx, NetIntHvsplusContext *s,
@@ -260,7 +457,7 @@ static av_cold int init_hwframe_pad(AVFilterContext *ctx, NetIntHvsplusContext *
         ni_device_session_context_clear(&hwp_ctx->api_ctx);
         goto out;
     }
-#if IS_FFMPEG_70_AND_ABOVE
+#if IS_FFMPEG_61_AND_ABOVE
     s->buffer_limit = 1;
 #endif
     /* Create scale frame pool on device */
@@ -371,200 +568,38 @@ static void cleanup_hwframe_crop(NetIntHvsplusContext *s)
     }
 }
 
-static int init_ai_context(AVFilterContext *ctx, NetIntHvsplusContext *s,
-                           AVFrame *frame) {
-    ni_retcode_t retval;
-    AiContext *ai_ctx;
+static av_cold int init(AVFilterContext *ctx)
+{
+    NetIntHvsplusContext *s = ctx->priv;
+
+    s->initialized = 0;
+    s->nb_width = -1;
+    s->nb_height = -1;
+    s->need_padding = 0;
+
+    return 0;
+}
+
+static av_cold void uninit(AVFilterContext *ctx)
+{
+    NetIntHvsplusContext *s  = ctx->priv;
     ni_hvsplus_network_t *network = &s->network;
-    int hwframe = frame->format == AV_PIX_FMT_NI_QUAD ? 1 : 0;
-    int ret;
 
-    av_log(ctx, AV_LOG_INFO, "%s: %d x %d format %s\n", __func__,
-           s->out_width, s->out_height, av_get_pix_fmt_name(frame->format));
+    cleanup_ai_context(ctx, s);
 
-    ai_ctx = av_mallocz(sizeof(AiContext));
-    if (!ai_ctx) {
-        av_log(ctx, AV_LOG_ERROR, "Error: failed to allocate ai context\n");
-        return AVERROR(ENOMEM);
-    }
-    s->ai_ctx = ai_ctx;
-    retval = ni_device_session_context_init(&ai_ctx->api_ctx);
-    if (retval != NI_RETCODE_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "Error: ai session context init failure\n");
-        return AVERROR(EIO);
-    }
-
-    AVHWFramesContext *pAVHFWCtx;
-    AVNIDeviceContext *pAVNIDevCtx;
-    AVHWFramesContext *out_frames_ctx;
-    AVNIFramesContext *f_hwctx;
-    int cardno;
-    if (hwframe) {
-        pAVHFWCtx = (AVHWFramesContext*) frame->hw_frames_ctx->data;
-        pAVNIDevCtx = (AVNIDeviceContext*) pAVHFWCtx->device_ctx->hwctx;
-        cardno = ni_get_cardno(frame);
-
-        ai_ctx->api_ctx.device_handle = pAVNIDevCtx->cards[cardno];
-        ai_ctx->api_ctx.blk_io_handle = pAVNIDevCtx->cards[cardno];
-        ai_ctx->api_ctx.hw_action = NI_CODEC_HW_ENABLE;
-        ai_ctx->api_ctx.hw_id = cardno;
-    } else
-        ai_ctx->api_ctx.hw_id = s->devid;
-
-    ai_ctx->api_ctx.device_type = NI_DEVICE_TYPE_AI;
-    ai_ctx->api_ctx.keep_alive_timeout = s->keep_alive_timeout;
-
-    retval = ni_device_session_open(&ai_ctx->api_ctx, NI_DEVICE_TYPE_AI);
-    if (retval != NI_RETCODE_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "Error: failed to open ai session. retval %d\n",
-                retval);
-        ret = AVERROR(EIO);
-        goto failed_out;
-    }
-
-    // Configure NB file
-    av_log(ctx, AV_LOG_DEBUG, "%s: out w %d h %d NB w %d h %d sw_format %s \n", __func__,
-            s->out_width, s->out_height, s->nb_width, s->nb_height, av_get_pix_fmt_name(hwframe?pAVHFWCtx->sw_format:frame->format));
-
-    ai_ctx->api_ctx.active_video_width = s->nb_width;
-    ai_ctx->api_ctx.active_video_height = s->nb_height;
-    ai_ctx->api_ctx.hvsplus_level = s->level;
-    ai_ctx->api_ctx.pixel_format = ff_ni_ffmpeg_to_libxcoder_pix_fmt(
-            (hwframe ? pAVHFWCtx->sw_format : frame->format));
-
-    retval = ni_ai_config_hvsplus(&ai_ctx->api_ctx, &network->raw);
-
-    if (retval != NI_RETCODE_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "Error: failed to configure ai session. retval %d\n",
-                retval);
-        ret = AVERROR(EIO);
-        goto failed_out;
-    }
-
-    if (!hwframe) {
-        return 0;
-    }
-    out_frames_ctx = (AVHWFramesContext*) s->out_frames_ref->data;
-    f_hwctx = (AVNIFramesContext*) out_frames_ctx->hwctx;
-    f_hwctx->api_ctx.session_timestamp = ai_ctx->api_ctx.session_timestamp;
-
-    // Create frame pool
-    int format = ff_ni_ffmpeg_to_gc620_pix_fmt(pAVHFWCtx->sw_format);
-    int options = NI_AI_FLAG_IO | NI_AI_FLAG_PC;
-    if (s->buffer_limit)
-        options |= NI_AI_FLAG_LM;
-
-    /* Allocate a pool of frames by the AI */
-    retval = ni_device_alloc_frame(&ai_ctx->api_ctx, FFALIGN(s->nb_width, 2),
-            FFALIGN(s->nb_height, 2), format, options, 0, // rec width
-            0, // rec height
-            0, // rec X pos
-            0, // rec Y pos
-            8, // rgba color/pool size
-            0, // frame index
-            NI_DEVICE_TYPE_AI);
-    if (retval != NI_RETCODE_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "Error: failed to create buffer pool\n");
-        ret = AVERROR(ENOMEM);
-        goto failed_out;
-    }
-    retval = ni_frame_buffer_alloc_hwenc(&ai_ctx->api_dst_frame.data.frame,
-            FFALIGN(s->nb_width, 2), FFALIGN(s->nb_height, 2), 0);
-
-    if (retval != NI_RETCODE_SUCCESS) {
-        av_log(ctx, AV_LOG_ERROR, "Error: failed to allocate ni dst frame\n");
-        ret = AVERROR(ENOMEM);
-        goto failed_out;
-    }
-
-    return 0;
-
-    failed_out: cleanup_ai_context(ctx, s);
-    return ret;
-}
-
-static void ni_destroy_network(AVFilterContext *ctx,
-                               ni_hvsplus_network_t *network) {
-    if (network) {
-        int i;
-
-        if (network->layers) {
-            for (i = 0; i < network->raw.output_num; i++) {
-                if (network->layers[i].output) {
-                    free(network->layers[i].output);
-                    network->layers[i].output = NULL;
-                }
-            }
-
-            free(network->layers);
-            network->layers = NULL;
-        }
-    }
-}
-
-static int ni_create_network(AVFilterContext *ctx, ni_hvsplus_network_t *network) {
-    int ret;
-    int i;
-    ni_network_data_t *ni_network = &network->raw;
-
-    av_log(ctx, AV_LOG_INFO, "network input number %d, output number %d\n",
-          ni_network->input_num, ni_network->output_num);
-
-    if (ni_network->input_num == 0 || ni_network->output_num == 0) {
-        av_log(ctx, AV_LOG_ERROR, "Error: invalid network layer\n");
-        return AVERROR(EINVAL);
-    }
-
-    network->layers =
-        malloc(sizeof(ni_hvsplus_network_layer_t) * ni_network->output_num);
-    if (!network->layers) {
-        av_log(ctx, AV_LOG_ERROR, "Error: cannot allocate network layer memory\n");
-        return AVERROR(ENOMEM);
-    }
-    memset(network->layers, 0,
-          sizeof(ni_hvsplus_network_layer_t) * ni_network->output_num);
-
-    for (i = 0; i < ni_network->output_num; i++) {
-        network->layers[i].channel   = ni_network->linfo.out_param[i].sizes[0];
-        network->layers[i].width     = ni_network->linfo.out_param[i].sizes[1];
-        network->layers[i].height    = ni_network->linfo.out_param[i].sizes[2];
-        network->layers[i].component = 3;
-        network->layers[i].classes =
-            (network->layers[i].channel / network->layers[i].component) -
-            (4 + 1);
-        network->layers[i].output_number =
-            ni_ai_network_layer_dims(&ni_network->linfo.out_param[i]);
-        av_assert0(network->layers[i].output_number ==
-                   network->layers[i].width * network->layers[i].height *
-                   network->layers[i].channel);
-
-        network->layers[i].output =
-            malloc(network->layers[i].output_number * sizeof(float));
-        if (!network->layers[i].output) {
-            av_log(ctx, AV_LOG_ERROR,
-                   "Error: failed to allocate network layer %d output buffer\n", i);
-            ret = AVERROR(ENOMEM);
-            goto out;
-        }
-
-        av_log(ctx, AV_LOG_DEBUG, "%s: network layer %d: w %d, h %d, ch %d, co %d, cl %d\n", __func__, i,
-               network->layers[i].width, network->layers[i].height,
-               network->layers[i].channel, network->layers[i].component,
-               network->layers[i].classes);
-    }
-
-    network->netw = ni_network->linfo.in_param[0].sizes[1];
-    network->neth = ni_network->linfo.in_param[0].sizes[2];
-    network->net_out_w = ni_network->linfo.out_param[0].sizes[1];
-    network->net_out_h = ni_network->linfo.out_param[0].sizes[2];
-
-    return 0;
-out:
     ni_destroy_network(ctx, network);
-    return ret;
+
+    av_buffer_unref(&s->out_frames_ref);
+    s->out_frames_ref = NULL;
+
+    if (s->need_padding) {
+        cleanup_hwframe_pad(s);
+        cleanup_hwframe_crop(s);
+    }
 }
 
-static int ni_hvsplus_config_input(AVFilterContext *ctx, AVFrame *frame) {
+static int config_input(AVFilterContext *ctx, AVFrame *frame)
+{
     NetIntHvsplusContext *s = ctx->priv;
     int hwframe = frame->format == AV_PIX_FMT_NI_QUAD ? 1 : 0;
     int ret;
@@ -583,8 +618,7 @@ static int ni_hvsplus_config_input(AVFilterContext *ctx, AVFrame *frame) {
         goto fail_out;
     }
 
-    if(hwframe && s->need_padding)
-    {
+    if (hwframe && s->need_padding) {
         AVHWFramesContext *pAVHFWCtx = (AVHWFramesContext*) frame->hw_frames_ctx->data;
         av_log(ctx, AV_LOG_INFO, "%s: hw frame sw format %s\n", __func__, av_get_pix_fmt_name(pAVHFWCtx->sw_format));
 
@@ -614,35 +648,8 @@ fail_out:
     return ret;
 }
 
-static av_cold int ni_hvsplus_init(AVFilterContext *ctx) {
-    NetIntHvsplusContext *s = ctx->priv;
-
-    s->initialized = 0;
-    s->nb_width = -1;
-    s->nb_height = -1;
-    s->need_padding = 0;
-
-   return 0;
-}
-
-static av_cold void ni_hvsplus_uninit(AVFilterContext *ctx) {
-    NetIntHvsplusContext *s  = ctx->priv;
-    ni_hvsplus_network_t *network = &s->network;
-
-    cleanup_ai_context(ctx, s);
-
-    ni_destroy_network(ctx, network);
-
-    av_buffer_unref(&s->out_frames_ref);
-    s->out_frames_ref = NULL;
-
-    if(s->need_padding) {
-        cleanup_hwframe_pad(s);
-        cleanup_hwframe_crop(s);
-    }
-}
-
-static int ni_hvsplus_output_config_props_internal(AVFilterLink *outlink) {
+static int output_config_props_internal(AVFilterLink *outlink)
+{
     AVFilterContext *ctx = outlink->src;
     AVFilterLink *inlink = outlink->src->inputs[0];
     AVHWFramesContext *in_frames_ctx;
@@ -650,12 +657,12 @@ static int ni_hvsplus_output_config_props_internal(AVFilterLink *outlink) {
     NetIntHvsplusContext *s = ctx->priv;
     int out_width, out_height;
 
-    if(s->out_width == -1 || s->out_height == -1){
+    if (s->out_width == -1 || s->out_height == -1) {
         out_width = inlink->w;
         out_height = inlink->h;
         s->out_width = out_width;
         s->out_height = out_height;
-    }else{
+    } else {
         out_width = s->out_width;
         out_height = s->out_height;
     }
@@ -726,7 +733,8 @@ static int ni_hvsplus_output_config_props_internal(AVFilterLink *outlink) {
     return 0;
 }
 
-static int ni_hvsplus_output_config_props(AVFilterLink *outlink) {
+static int output_config_props(AVFilterLink *outlink)
+{
     AVFilterContext *ctx = outlink->src;
     AVFilterLink *inlink = outlink->src->inputs[0];
     NetIntHvsplusContext *s = ctx->priv;
@@ -747,10 +755,10 @@ static int ni_hvsplus_output_config_props(AVFilterLink *outlink) {
         return AVERROR(EINVAL);
     }
 #endif
-    if(s->out_width == -1 || s->out_height == -1){
+    if (s->out_width == -1 || s->out_height == -1) {
         out_width = inlink->w;
         out_height = inlink->h;
-    }else{
+    } else {
         out_width = s->out_width;
         out_height = s->out_height;
     }
@@ -760,18 +768,15 @@ static int ni_hvsplus_output_config_props(AVFilterLink *outlink) {
     // If they don't match, padding and cropping are needed before and after hvsplus filter respectively.
     // If they are greater than 4k, it is not supported. Then, exit.
     retval = findNBSize(inlink->w, inlink->h);
-    if(retval < 0) {
+    if (retval < 0) {
         av_log(ctx, AV_LOG_ERROR, "Error: hvsplus doesn't support resolution greater than 4K (width %d height %d).\n", out_width, out_height);
         return AVERROR(EINVAL);
     }
 
-    if(retval == 0)
-    {
+    if (retval == 0) {
         s->nb_width = inlink->w;
         s->nb_height = inlink->h;
-    }
-    else
-    {
+    } else {
         s->nb_width = nbSizes[retval-1].width;
         s->nb_height = nbSizes[retval-1].height;
         s->need_padding = 1;
@@ -780,31 +785,43 @@ static int ni_hvsplus_output_config_props(AVFilterLink *outlink) {
     av_log(ctx, AV_LOG_DEBUG, "%s: inlink w %d h %d NB w %d h %d need_padding %d\n",
             __func__, inlink->w, inlink->h, s->nb_width, s->nb_height, s->need_padding);
 
-    ret = ni_hvsplus_output_config_props_internal(outlink);
+    ret = output_config_props_internal(outlink);
 
     return ret;
 }
 
-static int av_to_niframe_copy(ni_frame_t *dst, const AVFrame *src, int nb_planes) {
-    int dst_stride[4],src_height[4], hpad[4], vpad[4];
+static int av_to_niframe_copy(NetIntHvsplusContext *s, ni_frame_t *dst, const AVFrame *src, int nb_planes)
+{
+    int dst_stride[4],src_height[4], hpad[4], vpad[4], linesize[4];
     int i, j, h;
     uint8_t *src_line, *dst_line, YUVsample, *sample, *dest;
     uint16_t lastidx;
     bool tenBit;
 
-    av_log(NULL, AV_LOG_DEBUG, "%s: src width %d height %d format %s\n", __func__,
-           src->width, src->height, av_get_pix_fmt_name(src->format));
+    av_log(NULL, AV_LOG_DEBUG, "%s: src width %d height %d nb w %d nb h %d format %s linesize %d %d %d nb_planes %d\n", __func__,
+           src->width, src->height, s->nb_width, s->nb_height, av_get_pix_fmt_name(src->format),
+           src->linesize[0], src->linesize[1], src->linesize[2], nb_planes);
+
+    linesize[0] = src->linesize[0];
+    linesize[1] = src->linesize[1];
+    linesize[2] = src->linesize[2];
+    linesize[3] = 0;
 
     switch (src->format) {
     case AV_PIX_FMT_YUV420P:
     case AV_PIX_FMT_YUVJ420P:
-        dst_stride[0] = FFALIGN(src->width, 128);
-        dst_stride[1] = FFALIGN((src->width / 2), 128);
+        dst_stride[0] = FFALIGN(s->nb_width, 128);
+        dst_stride[1] = FFALIGN((s->nb_width / 2), 128);
         dst_stride[2] = dst_stride[1];
         dst_stride[3] = 0;
-        hpad[0] = FFMAX(dst_stride[0] - src->linesize[0], 0);
-        hpad[1] = FFMAX(dst_stride[1] - src->linesize[1], 0);
-        hpad[2] = FFMAX(dst_stride[2] - src->linesize[2], 0);
+
+        linesize[0] = FFALIGN(src->width, 2);
+        linesize[1] = FFALIGN(src->width, 2) / 2;
+        linesize[2] = linesize[1];
+
+        hpad[0] = FFMAX(dst_stride[0] - linesize[0], 0);
+        hpad[1] = FFMAX(dst_stride[1] - linesize[1], 0);
+        hpad[2] = FFMAX(dst_stride[2] - linesize[2], 0);
         hpad[3] = 0;
 
         src_height[0] = src->height;
@@ -812,21 +829,26 @@ static int av_to_niframe_copy(ni_frame_t *dst, const AVFrame *src, int nb_planes
         src_height[2] = FFALIGN(src->height, 2) / 2;
         src_height[3] = 0;
 
-        vpad[0] = FFALIGN(src_height[0], 2) - src_height[0];
-        vpad[1] = FFALIGN(src_height[1], 2) - src_height[1];
-        vpad[2] = FFALIGN(src_height[2], 2) - src_height[2];
+        vpad[0] = FFALIGN(s->nb_height, 2) - src->height;
+        vpad[1] = (FFALIGN(s->nb_height, 2) / 2) - (FFALIGN(src->height, 2) / 2);
+        vpad[2] = (FFALIGN(s->nb_height, 2) / 2) - (FFALIGN(src->height, 2) / 2);
         vpad[3] = 0;
 
         tenBit = false;
         break;
     case AV_PIX_FMT_YUV420P10LE:
-        dst_stride[0] = FFALIGN(src->width * 2, 128);
-        dst_stride[1] = FFALIGN(src->width, 128);
+        dst_stride[0] = FFALIGN(s->nb_width * 2, 128);
+        dst_stride[1] = FFALIGN(s->nb_width, 128);
         dst_stride[2] = dst_stride[1];
         dst_stride[3] = 0;
-        hpad[0] = FFMAX(dst_stride[0] - src->linesize[0], 0);
-        hpad[1] = FFMAX(dst_stride[1] - src->linesize[1], 0);
-        hpad[2] = FFMAX(dst_stride[2] - src->linesize[2], 0);
+
+        linesize[0] = src->width * 2;
+        linesize[1] = src->width;
+        linesize[2] = linesize[1];
+
+        hpad[0] = FFMAX(dst_stride[0] - linesize[0], 0);
+        hpad[1] = FFMAX(dst_stride[1] - linesize[1], 0);
+        hpad[2] = FFMAX(dst_stride[2] - linesize[2], 0);
         hpad[3] = 0;
 
         src_height[0] = src->height;
@@ -834,9 +856,9 @@ static int av_to_niframe_copy(ni_frame_t *dst, const AVFrame *src, int nb_planes
         src_height[2] = FFALIGN(src->height, 2) / 2;
         src_height[3] = 0;
 
-        vpad[0] = FFALIGN(src_height[0], 2) - src_height[0];
-        vpad[1] = FFALIGN(src_height[1], 2) - src_height[1];
-        vpad[2] = FFALIGN(src_height[2], 2) - src_height[2];
+        vpad[0] = FFALIGN(s->nb_height, 2) - src->height;
+        vpad[1] = (FFALIGN(s->nb_height, 2) / 2) - (FFALIGN(src->height, 2) / 2);
+        vpad[2] = (FFALIGN(s->nb_height, 2) / 2) - (FFALIGN(src->height, 2) / 2);
         vpad[3] = 0;
 
         tenBit = true;
@@ -846,8 +868,8 @@ static int av_to_niframe_copy(ni_frame_t *dst, const AVFrame *src, int nb_planes
         dst_stride[1] = dst_stride[0];
         dst_stride[2] = 0;
         dst_stride[3] = 0;
-        hpad[0] = FFMAX(dst_stride[0] - src->linesize[0], 0);
-        hpad[1] = FFMAX(dst_stride[1] - src->linesize[1], 0);
+        hpad[0] = FFMAX(dst_stride[0] - linesize[0], 0);
+        hpad[1] = FFMAX(dst_stride[1] - linesize[1], 0);
         hpad[2] = 0;
         hpad[3] = 0;
 
@@ -890,8 +912,8 @@ static int av_to_niframe_copy(ni_frame_t *dst, const AVFrame *src, int nb_planes
         dst_stride[1] = dst_stride[0];
         dst_stride[2] = 0;
         dst_stride[3] = 0;
-        hpad[0] = FFMAX(dst_stride[0] - src->linesize[0], 0);
-        hpad[1] = FFMAX(dst_stride[1] - src->linesize[1], 0);
+        hpad[0] = FFMAX(dst_stride[0] - linesize[0], 0);
+        hpad[1] = FFMAX(dst_stride[1] - linesize[1], 0);
         hpad[2] = 0;
         hpad[3] = 0;
 
@@ -916,7 +938,7 @@ static int av_to_niframe_copy(ni_frame_t *dst, const AVFrame *src, int nb_planes
         dst_stride[1] = 0;
         dst_stride[2] = 0;
         dst_stride[3] = 0;
-        hpad[0] = FFMAX(dst_stride[0] - src->linesize[0], 0);
+        hpad[0] = FFMAX(dst_stride[0] - linesize[0], 0);
         hpad[1] = 0;
         hpad[2] = 0;
         hpad[3] = 0;
@@ -938,9 +960,9 @@ static int av_to_niframe_copy(ni_frame_t *dst, const AVFrame *src, int nb_planes
         dst_stride[1] = 0;
         dst_stride[2] = 0;
         dst_stride[3] = 0;
-        hpad[0] = FFMAX(dst_stride[0] - src->linesize[0], 0);
-        hpad[1] = FFMAX(dst_stride[1] - src->linesize[1], 0);
-        hpad[2] = FFMAX(dst_stride[2] - src->linesize[2], 0);
+        hpad[0] = FFMAX(dst_stride[0] - linesize[0], 0);
+        hpad[1] = FFMAX(dst_stride[1] - linesize[1], 0);
+        hpad[2] = FFMAX(dst_stride[2] - linesize[2], 0);
         hpad[3] = 0;
 
         src_height[0] = src->height;
@@ -961,7 +983,7 @@ static int av_to_niframe_copy(ni_frame_t *dst, const AVFrame *src, int nb_planes
         dst_stride[1] = 0;
         dst_stride[2] = 0;
         dst_stride[3] = 0;
-        hpad[0] = FFMAX(dst_stride[0] - src->linesize[0], 0);
+        hpad[0] = FFMAX(dst_stride[0] - linesize[0], 0);
         hpad[1] = 0;
         hpad[2] = 0;
         hpad[3] = 0;
@@ -987,21 +1009,21 @@ static int av_to_niframe_copy(ni_frame_t *dst, const AVFrame *src, int nb_planes
            dst_stride[0], dst_stride[1], dst_stride[2],
            src->linesize[0], src->linesize[1], src->linesize[2],
            hpad[0], hpad[1], hpad[2]);
-    av_log(NULL, AV_LOG_DEBUG, "%s: src_height %d %d %d vpad %d %d %d tenBit\n", __func__,
+    av_log(NULL, AV_LOG_DEBUG, "%s: src_height %d %d %d vpad %d %d %d tenBit %d\n", __func__,
            src_height[0], src_height[1], src_height[2],
-           vpad[0], vpad[1], vpad[2]);
+           vpad[0], vpad[1], vpad[2], tenBit);
 
     dst_line = dst->p_buffer;
     for (i = 0; i < nb_planes; i++) {
         src_line = src->data[i];
         for (h = 0; h < src_height[i]; h++) {
-            memcpy(dst_line, src_line, FFMIN(src->linesize[i], dst_stride[i]));
+            memcpy(dst_line, src_line, FFMIN(linesize[i], dst_stride[i]));
 
             if (h == 0)
-                av_log(NULL, AV_LOG_DEBUG, "%s: i %d h %d to %d memcpy size %d\n", __func__, i, h, src_height[i]-1, FFMIN(src->linesize[i], dst_stride[i]));
+                av_log(NULL, AV_LOG_DEBUG, "%s: i %d h %d to %d memcpy size %d\n", __func__, i, h, src_height[i]-1, FFMIN(linesize[i], dst_stride[i]));
 
             if (hpad[i]) {
-                lastidx = src->linesize[i];
+                lastidx = linesize[i];
 
                 if (tenBit) {
                     sample = &src_line[lastidx - 2];
@@ -1012,14 +1034,14 @@ static int av_to_niframe_copy(ni_frame_t *dst, const AVFrame *src, int nb_planes
                         memcpy(dest, sample, 2);
                         dest += 2;
                     }
-                    if(h == 0)
+                    if (h == 0)
                         av_log(NULL, AV_LOG_DEBUG, "%s: i %d hpad %d to %d memset size %d value %d %d tenBit\n", __func__, i, h, src_height[i]-1, hpad[i], sample[0], sample[1]);
 
                 } else {
                     YUVsample = dst_line[lastidx - 1];
                     memset(&dst_line[lastidx], YUVsample, hpad[i]);
 
-                    if(h == 0)
+                    if (h == 0)
                         av_log(NULL, AV_LOG_DEBUG, "%s: i %d hpad %d to %d memset size %d value %d\n", __func__, i, h, src_height[i]-1, hpad[i], YUVsample);
                 }
             }
@@ -1042,34 +1064,41 @@ static int av_to_niframe_copy(ni_frame_t *dst, const AVFrame *src, int nb_planes
     return 0;
 }
 
-static int ni_to_avframe_copy(AVFrame *dst, const ni_packet_t *src, int nb_planes) {
-    int src_linesize[4], src_height[4];
+static int ni_to_avframe_copy(NetIntHvsplusContext *s, AVFrame *dst, const ni_packet_t *src, int nb_planes)
+{
+    int src_linesize[4], src_height[4], dst_height[4];
     int i, h;
     uint8_t *src_line, *dst_line;
 
-    av_log(NULL, AV_LOG_DEBUG, "%s: dst width %d height %d format %s\n", __func__,
-           dst->width, dst->height, av_get_pix_fmt_name(dst->format));
+    av_log(NULL, AV_LOG_DEBUG, "%s: dst width %d height %d nb w %d nb h %d format %s nb_planes %d\n", __func__,
+           dst->width, dst->height, s->nb_width, s->nb_height, av_get_pix_fmt_name(dst->format), nb_planes);
+
+    dst_height[0] = dst->height;
+    dst_height[1] = dst->height / 2;
+    dst_height[2] = dst_height[1];
+    dst_height[3] = 0;
+
     switch (dst->format) {
     case AV_PIX_FMT_YUV420P:
     case AV_PIX_FMT_YUVJ420P:
-        src_linesize[0] = FFALIGN(dst->width, 128);
-        src_linesize[1] = FFALIGN(dst->width / 2, 128);
+        src_linesize[0] = FFALIGN(s->nb_width, 128);
+        src_linesize[1] = FFALIGN(s->nb_width / 2, 128);
         src_linesize[2] = src_linesize[1];
         src_linesize[3] = 0;
 
-        src_height[0] = dst->height;
-        src_height[1] = FFALIGN(dst->height, 2) / 2;
+        src_height[0] = s->nb_height;
+        src_height[1] = FFALIGN(s->nb_height, 2) / 2;
         src_height[2] = src_height[1];
         src_height[3] = 0;
         break;
     case AV_PIX_FMT_YUV420P10LE:
-        src_linesize[0] = FFALIGN(dst->width * 2, 128);
-        src_linesize[1] = FFALIGN(dst->width, 128);
+        src_linesize[0] = FFALIGN(s->nb_width * 2, 128);
+        src_linesize[1] = FFALIGN(s->nb_width, 128);
         src_linesize[2] = src_linesize[1];
         src_linesize[3] = 0;
 
-        src_height[0] = dst->height;
-        src_height[1] = FFALIGN(dst->height, 2) / 2;
+        src_height[0] = s->nb_height;
+        src_height[1] = FFALIGN(s->nb_height, 2) / 2;
         src_height[2] = src_height[1];
         src_height[3] = 0;
         break;
@@ -1149,20 +1178,24 @@ static int ni_to_avframe_copy(AVFrame *dst, const ni_packet_t *src, int nb_plane
                av_get_pix_fmt_name(dst->format));
         return AVERROR(EINVAL);
     }
-    av_log(NULL, AV_LOG_DEBUG, "%s: src_linesize %d %d %d src_height %d %d %d\n", __func__,
+    av_log(NULL, AV_LOG_DEBUG, "%s: src_linesize %d %d %d src_height %d %d %d dst linesize %d %d %d dst_height %d %d %d\n", __func__,
            src_linesize[0], src_linesize[1], src_linesize[2],
-           src_height[0], src_height[1], src_height[2]);
+           src_height[0], src_height[1], src_height[2],
+           dst->linesize[0], dst->linesize[1], dst->linesize[2],
+           dst_height[0], dst_height[1], dst_height[2]);
 
     src_line = src->p_data;
     for (i = 0; i < nb_planes; i++) {
         dst_line = dst->data[i];
 
         for (h = 0; h < src_height[i]; h++) {
-            memcpy(dst_line, src_line,
-                   FFMIN(src_linesize[i], dst->linesize[i]));
-            if (h == 0)
-                av_log(NULL, AV_LOG_DEBUG, "%s: i %d h %d to %d memcpy size %d\n", __func__, i, h, src_height[i]-1,  FFMIN(src_linesize[i], dst->linesize[i]));
-            dst_line += FFMIN(src_linesize[i], dst->linesize[i]);
+            if (h < dst_height[i]) {
+                memcpy(dst_line, src_line,
+                       FFMIN(src_linesize[i], dst->linesize[i]));
+                if (h == 0)
+                    av_log(NULL, AV_LOG_DEBUG, "%s: i %d h %d to %d memcpy size %d\n", __func__, i, h, src_height[i]-1,  FFMIN(src_linesize[i], dst->linesize[i]));
+                dst_line += FFMIN(src_linesize[i], dst->linesize[i]);
+            }
             src_line += src_linesize[i];
         }
     }
@@ -1206,10 +1239,10 @@ static int ni_hwframe_pad(AVFilterContext *ctx, NetIntHvsplusContext *s, AVFrame
      * Allocate device input frame. This call won't actually allocate a frame,
      * but sends the incoming hardware frame index to the scaler manager
      */
-    retcode = ni_device_alloc_frame(&pad_ctx->api_ctx,      //
-                                    FFALIGN(in->width, 2),  //
-                                    FFALIGN(in->height, 2), //
-                                    scaler_format,          //
+    retcode = ni_device_alloc_frame(&pad_ctx->api_ctx,
+                                    FFALIGN(in->width, 2),
+                                    FFALIGN(in->height, 2),
+                                    scaler_format,
                                     0,                      // input frame
                                     in->width,  // src rectangle width
                                     in->height, // src rectangle height
@@ -1242,8 +1275,7 @@ static int ni_hwframe_pad(AVFilterContext *ctx, NetIntHvsplusContext *s, AVFrame
                                     -1,
                                     NI_DEVICE_TYPE_SCALER);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         av_log(NULL, AV_LOG_ERROR, "Error: Can't allocate device output frame %d\n", retcode);
         return AVERROR(ENOMEM);
     }
@@ -1286,7 +1318,7 @@ static int ni_hwframe_crop(AVFilterContext *ctx, NetIntHvsplusContext *s, AVFram
 
     scaler_format = ff_ni_ffmpeg_to_gc620_pix_fmt(pAVHFWCtx->sw_format);
 
-    retcode = ni_frame_buffer_alloc_hwenc(&crop_ctx->api_dst_frame.data.frame, s->nb_width, s->nb_height, // w, h, //
+    retcode = ni_frame_buffer_alloc_hwenc(&crop_ctx->api_dst_frame.data.frame, s->nb_width, s->nb_height, // w, h,
                                           0);
     if (retcode != NI_RETCODE_SUCCESS) {
         av_log(NULL, AV_LOG_ERROR, "Error: Cannot allocate memory\n");
@@ -1304,11 +1336,11 @@ static int ni_hwframe_crop(AVFilterContext *ctx, NetIntHvsplusContext *s, AVFram
      * Allocate device input frame. This call won't actually allocate a frame,
      * but sends the incoming hardware frame index to the scaler manager
      */
-    retcode = ni_device_alloc_frame(&crop_ctx->api_ctx,               //
-                                    FFALIGN(s->nb_width, 2),  //
-                                    FFALIGN(s->nb_height, 2), //
-                                    scaler_format,             //
-                                    0,                         // input frame
+    retcode = ni_device_alloc_frame(&crop_ctx->api_ctx,
+                                    FFALIGN(s->nb_width, 2),
+                                    FFALIGN(s->nb_height, 2),
+                                    scaler_format,
+                                    0, // input frame
                                     w, // src rectangle width
                                     h, // src rectangle height
                                     0, // src rectangle x
@@ -1336,8 +1368,7 @@ static int ni_hwframe_crop(AVFilterContext *ctx, NetIntHvsplusContext *s, AVFram
                         -1,
                         NI_DEVICE_TYPE_SCALER);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         av_log(NULL, AV_LOG_ERROR, "Error: Can't allocate device output frame %d\n", retcode);
         return AVERROR(ENOMEM);
     }
@@ -1346,8 +1377,7 @@ static int ni_hwframe_crop(AVFilterContext *ctx, NetIntHvsplusContext *s, AVFram
     retcode = ni_device_session_read_hwdesc(
         &crop_ctx->api_ctx, &crop_ctx->api_dst_frame, NI_DEVICE_TYPE_SCALER);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "%s: Error: Can't allocate device output frame %d\n", __func__, retcode);
         return AVERROR(ENOMEM);
     }
@@ -1363,7 +1393,8 @@ static int ni_hwframe_crop(AVFilterContext *ctx, NetIntHvsplusContext *s, AVFram
     return 0;
 }
 
-static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
+static int filter_frame_internal(AVFilterLink *link, AVFrame *in)
+{
     AVFilterContext *ctx = link->dst;
     AVHWFramesContext *in_frames_context = NULL; //= (AVHWFramesContext *) in->hw_frames_ctx->data;
     NetIntHvsplusContext *s  = ctx->priv;
@@ -1373,24 +1404,22 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
     AiContext *ai_ctx;
     ni_hvsplus_network_t *network = &s->network;
     int nb_planes;
-
+    int64_t start_t;
     int hwframe = in->format == AV_PIX_FMT_NI_QUAD ? 1 : 0;
 
     av_log(ctx, AV_LOG_DEBUG, "%s: filter %p hwframe %d format %s\n", __func__, s, hwframe, av_get_pix_fmt_name(in->format));
 
     if (!s->initialized) {
         AVHWFramesContext *pAVHFWCtx;
-        if (hwframe)
-        {
+        if (hwframe) {
             pAVHFWCtx = (AVHWFramesContext *) in->hw_frames_ctx->data;
         }
-        ret = ni_hvsplus_config_input(ctx, in);
+        ret = config_input(ctx, in);
         if (ret) {
             av_log(ctx, AV_LOG_ERROR, "Error: failed to config input\n");
             goto failed_out;
         }
-        if (hwframe)
-        {
+        if (hwframe) {
             av_hwframe_ctx_init(s->out_frames_ref);
             AVHWFramesContext *out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
             AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
@@ -1401,23 +1430,23 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
 
     ai_ctx = s->ai_ctx;
     out = av_frame_alloc();
-    if (!out)
-    {
+    if (!out) {
         ret = AVERROR(ENOMEM);
         goto failed_out;
-    }  
+    }
 
     av_frame_copy_props(out, in);
 
     av_log(ctx, AV_LOG_DEBUG, "%s: out_width %d out_height %d in width %d height %d\n",
             __func__, s->out_width, s->out_height, in->width, in->height);
 
-    if (hwframe)
-    {
+    if (hwframe) {
         niFrameSurface1_t *frame_surface;
         niFrameSurface1_t *hvsplus_surface;
         niFrameSurface1_t *out_surface;
         niFrameSurface1_t *frame_surface2;
+        int ai_out_format;
+        niFrameSurface1_t dst_surface = {0};
 
         in_frames_context = (AVHWFramesContext *) in->hw_frames_ctx->data;
 
@@ -1429,8 +1458,8 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
         /* Quadra 2D engine always outputs limited color range */
         out->color_range = AVCOL_RANGE_MPEG;
 
-        if(s->need_padding) {
-            ret = ni_hwframe_pad(ctx, s, in, s->nb_width, s->nb_height, //network->netw, network->neth, //
+        if (s->need_padding) {
+            ret = ni_hwframe_pad(ctx, s, in, s->nb_width, s->nb_height, //network->netw, network->neth,
                                    &frame_surface);
             if (ret < 0) {
                 av_log(ctx, AV_LOG_ERROR, "Error run hwframe pad\n");
@@ -1441,15 +1470,13 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
                     frame_surface->ui16FrameIdx);
 
             out->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-        }
-        else {
+        } else {
             // To hvsplus
             frame_surface = (niFrameSurface1_t *)in->data[3];
         }
 
         out->data[3] = av_malloc(sizeof(niFrameSurface1_t));
-        if (!out->data[3])
-        {
+        if (!out->data[3]) {
             av_log(ctx, AV_LOG_ERROR, "Error: ni hvsplus filter av_alloc returned NULL\n");
             ret = AVERROR(ENOMEM);
             goto failed_out;
@@ -1459,10 +1486,10 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
         av_log(ctx, AV_LOG_DEBUG, "%s: input frame surface frameIdx %d ui16width %d ui16height %d\n",
                __func__, frame_surface->ui16FrameIdx, frame_surface->ui16width, frame_surface->ui16height);
 
-        int64_t start_t = av_gettime();
+        start_t = av_gettime();
 
         /* set output buffer */
-        int ai_out_format = ff_ni_ffmpeg_to_gc620_pix_fmt(in_frames_context->sw_format);
+        ai_out_format = ff_ni_ffmpeg_to_gc620_pix_fmt(in_frames_context->sw_format);
 
         av_log(ctx, AV_LOG_DEBUG, "%s: in sw_format %s ai_out_format %d\n", __func__,
                av_get_pix_fmt_name(in_frames_context->sw_format), ai_out_format);
@@ -1471,20 +1498,18 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
         ff_ni_update_benchmark(NULL);
 #endif
 
-        niFrameSurface1_t dst_surface = {0};
-        do{
+        do {
             if (s->channel_mode) {
                 retval = ni_device_alloc_dst_frame(&(ai_ctx->api_ctx), &dst_surface, NI_DEVICE_TYPE_AI);
             } else {
-                if(s->need_padding) {
+                if (s->need_padding) {
                     av_log(ctx, AV_LOG_DEBUG, "%s: 1. Set output hw frame in Ai w %d h %d\n",
                             __func__, s->nb_width, s->nb_height);
                     retval = ni_device_alloc_frame(
                         &ai_ctx->api_ctx, FFALIGN(s->nb_width, 2), FFALIGN(s->nb_height,2),
                         ai_out_format, NI_AI_FLAG_IO, 0, 0,
                         0, 0, 0, -1, NI_DEVICE_TYPE_AI);
-                }
-                else {
+                } else {
                     av_log(ctx, AV_LOG_DEBUG, "%s: 1. Set output hw frame in Ai w %d h %d\n",
                             __func__, s->out_width, s->out_height);
                     retval = ni_device_alloc_frame(
@@ -1500,12 +1525,12 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
                 goto failed_out;
             }
 
-            if(av_gettime() - start_t > s->ai_timeout * 1000000){
+            if (av_gettime() - start_t > s->ai_timeout * 1000000) {
                 av_log(ctx, AV_LOG_ERROR, "Error: alloc hw output timeout\n");
                 ret = AVERROR(ENOMEM);
                 goto failed_out;
             }
-        }while(retval != NI_RETCODE_SUCCESS);
+        } while (retval != NI_RETCODE_SUCCESS);
 
         if (s->channel_mode) {
             // copy input hw frame to dst hw frame
@@ -1514,13 +1539,12 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
             frame_clone_desc.ui16SrcIdx = frame_surface->ui16FrameIdx;
             if (in_frames_context->sw_format == AV_PIX_FMT_YUV420P) {
                 // only support yuv420p
-                if(s->need_padding) {
+                if (s->need_padding) {
                     // offset Y size
                     frame_clone_desc.ui32Offset = NI_VPU_ALIGN128(s->nb_width) * NI_VPU_CEIL(s->nb_height, 2);
                     // copy U+V size
                     frame_clone_desc.ui32Size = NI_VPU_ALIGN128(s->nb_width / 2) * NI_VPU_CEIL(s->nb_height, 2);
-                }
-                else {
+                } else {
                     // offset Y size
                     frame_clone_desc.ui32Offset = NI_VPU_ALIGN128(s->out_width) * NI_VPU_CEIL(s->out_height, 2);
                     // copy U+V size
@@ -1562,23 +1586,23 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
             retval = ni_device_session_read_hwdesc(
                 &ai_ctx->api_ctx, &s->ai_ctx->api_dst_frame, NI_DEVICE_TYPE_AI);
 
-            if(retval < NI_RETCODE_SUCCESS){
+            if (retval < NI_RETCODE_SUCCESS) {
                 av_log(ctx, AV_LOG_ERROR, "Error: failed to read hwdesc,retval=%d\n", retval);
                 ret = AVERROR(EINVAL);
                 goto failed_out;
             }
-            if(av_gettime() - start_t > s->ai_timeout * 1000000){
+            if (av_gettime() - start_t > s->ai_timeout * 1000000) {
                 av_log(ctx, AV_LOG_ERROR, "Error: alloc hw output timeout\n");
                 ret = AVERROR(ENOMEM);
                 goto failed_out;
             }
-        } while(retval != NI_RETCODE_SUCCESS);
+        } while (retval != NI_RETCODE_SUCCESS);
 
 #ifdef NI_MEASURE_LATENCY
         ff_ni_update_benchmark("ni_quadra_hvsplus");
 #endif
 
-        if(s->need_padding) {
+        if (s->need_padding) {
 
             hvsplus_surface = (niFrameSurface1_t *) ai_ctx->api_dst_frame.data.frame.p_data[3];
 
@@ -1598,8 +1622,7 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
 
             av_log(ctx, AV_LOG_DEBUG, "filt frame surface frameIdx %d\n",
                     frame_surface2->ui16FrameIdx);
-        }
-        else {
+        } else {
             frame_surface2 = (niFrameSurface1_t *) ai_ctx->api_dst_frame.data.frame.p_data[3];
         }
 
@@ -1625,15 +1648,13 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
 
         out->buf[0] = av_buffer_create(out->data[3], sizeof(niFrameSurface1_t), ff_ni_frame_free, NULL, 0);
 
-        if (!out->buf[0])
-        {
+        if (!out->buf[0]) {
             av_log(ctx, AV_LOG_ERROR, "Error: ni hvsplus filter av_buffer_create returned NULL\n");
             ret = AVERROR(ENOMEM);
             av_log(NULL, AV_LOG_DEBUG, "Recycle trace ui16FrameIdx = [%d] DevHandle %d\n",
                     out_surface->ui16FrameIdx, out_surface->device_handle);
             retval = ni_hwframe_buffer_recycle(out_surface, out_surface->device_handle);
-            if (retval != NI_RETCODE_SUCCESS)
-            {
+            if (retval != NI_RETCODE_SUCCESS) {
                 av_log(NULL, AV_LOG_ERROR, "ERROR: Failed to recycle trace ui16FrameIdx = [%d] DevHandle %d\n",
                         out_surface->ui16FrameIdx, out_surface->device_handle);
             }
@@ -1642,22 +1663,20 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
 
         /* Reference the new hw frames context */
         out->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-    }
-    else
-    {
+    } else {
         out->width = s->out_width;
         out->height = s->out_height;
 
         out->format = in->format;
         av_log(ctx, AV_LOG_DEBUG, "%s: format %s allocate frame %d x %d\n", __func__, av_get_pix_fmt_name(in->format), out->width, out->height);
-        if (av_frame_get_buffer(out, 32) < 0)
-        {
+        if (av_frame_get_buffer(out, 32) < 0) {
             av_log(ctx, AV_LOG_ERROR, "Error: Could not allocate the AVFrame buffers\n");
             ret = AVERROR(ENOMEM);
             goto failed_out;
         }
 
-        int64_t start_t = av_gettime();
+        start_t = av_gettime();
+        // sw frame: step 1: allocate
         retval = ni_ai_frame_buffer_alloc(&ai_ctx->api_src_frame.data.frame,
                                           &network->raw);
         if (retval != NI_RETCODE_SUCCESS) {
@@ -1666,10 +1685,8 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
             goto failed_out;
         }
         nb_planes = av_pix_fmt_count_planes(in->format);
-        if (s->channel_mode)
-        {
-            if (in->format != AV_PIX_FMT_YUV420P && in->format != AV_PIX_FMT_YUVJ420P)
-            {
+        if (s->channel_mode) {
+            if (in->format != AV_PIX_FMT_YUV420P && in->format != AV_PIX_FMT_YUVJ420P) {
                 av_log(ctx, AV_LOG_ERROR, "Error: support yuv420p and yuvj420p only, current fmt %d\n",
                         in->format);
                 ret = AVERROR(EINVAL);
@@ -1677,9 +1694,9 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
             }
             nb_planes = 1; // only copy Y data
         }
-        retval = av_to_niframe_copy(&ai_ctx->api_src_frame.data.frame, in, nb_planes);
-        if (retval < 0)
-        {
+        // sw frame: step 2: pad and setup frame
+        retval = av_to_niframe_copy(s, &ai_ctx->api_src_frame.data.frame, in, nb_planes);
+        if (retval < 0) {
             av_log(ctx, AV_LOG_ERROR, "Error: hvsplus cannot copy frame\n");
             ret = AVERROR(EIO);
             goto failed_out;
@@ -1690,6 +1707,7 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
 #endif
 
         /* write frame */
+        // sw frame: step 3: write a frame to AI
         do {
             retval = ni_device_session_write(
                 &ai_ctx->api_ctx, &ai_ctx->api_src_frame, NI_DEVICE_TYPE_AI);
@@ -1700,12 +1718,13 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
                 goto failed_out;
             }
 
-            if(av_gettime() - start_t > s->ai_timeout * 1000000){
+            if (av_gettime() - start_t > s->ai_timeout * 1000000) {
                 av_log(ctx, AV_LOG_ERROR, "Error: write sw frame to AI timeout\n");
                 ret = AVERROR(ENOMEM);
                 goto failed_out;
             }
         } while (retval == 0);
+        // sw frame: step 4: alloc frame for read
         retval = ni_ai_packet_buffer_alloc(&ai_ctx->api_dst_frame.data.packet,
                                         &network->raw);
         if (retval != NI_RETCODE_SUCCESS) {
@@ -1715,6 +1734,7 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
         }
 
         start_t = av_gettime();
+        // sw frame: step 5: read a frame from AI
         do {
             retval = ni_device_session_read(&ai_ctx->api_ctx, &ai_ctx->api_dst_frame, NI_DEVICE_TYPE_AI);
             if (retval < 0) {
@@ -1722,7 +1742,7 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
                 ret = AVERROR(EIO);
                 goto failed_out;
             } else if (retval > 0) {
-                if(av_gettime() - start_t > s->ai_timeout * 1000000){
+                if (av_gettime() - start_t > s->ai_timeout * 1000000) {
                     av_log(ctx, AV_LOG_ERROR, "Error: read sw frame from AI timeout\n");
                     ret = AVERROR(ENOMEM);
                     goto failed_out;
@@ -1733,10 +1753,8 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
         ff_ni_update_benchmark("ni_quadra_hvsplus");
 #endif
         nb_planes = av_pix_fmt_count_planes(out->format);
-        if (s->channel_mode)
-        {
-            if (out->format != AV_PIX_FMT_YUV420P && out->format != AV_PIX_FMT_YUVJ420P)
-            {
+        if (s->channel_mode) {
+            if (out->format != AV_PIX_FMT_YUV420P && out->format != AV_PIX_FMT_YUVJ420P) {
                 av_log(ctx, AV_LOG_ERROR, "Error: support yuv420p and yuvj420p only, current fmt %d\n",
                         out->format);
                 ret = AVERROR(EINVAL);
@@ -1747,9 +1765,9 @@ static int ni_hvsplus_filter_frame_internal(AVFilterLink *link, AVFrame *in) {
             memcpy(out->data[1], in->data[1], in->height * in->linesize[1] / 2);
             memcpy(out->data[2], in->data[2], in->height * in->linesize[2] / 2);
         }
-        retval = ni_to_avframe_copy(out, &ai_ctx->api_dst_frame.data.packet, nb_planes);
-        if (retval < 0)
-        {
+        // sw frame: step 6: crop
+        retval = ni_to_avframe_copy(s, out, &ai_ctx->api_dst_frame.data.packet, nb_planes);
+        if (retval < 0) {
             av_log(ctx, AV_LOG_ERROR, "Error: hvsplus cannot copy ai frame to avframe\n");
             ret = AVERROR(EIO);
             goto failed_out;
@@ -1767,7 +1785,8 @@ failed_out:
     return ret;
 }
 
-static int ni_hvsplus_filter_frame(AVFilterLink *link, AVFrame *in) {
+static int filter_frame(AVFilterLink *link, AVFrame *in)
+{
     AVFilterContext *ctx = link->dst;
     int ret;
 
@@ -1776,7 +1795,7 @@ static int ni_hvsplus_filter_frame(AVFilterLink *link, AVFrame *in) {
         return AVERROR(EINVAL);
     }
 
-    ret = ni_hvsplus_filter_frame_internal(link, in);
+    ret = filter_frame_internal(link, in);
 
     return ret;
 }
@@ -1785,33 +1804,26 @@ static int ni_hvsplus_filter_frame(AVFilterLink *link, AVFrame *in) {
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_FILTERING_PARAM)
 
 static const AVOption ni_hvsplus_options[] = {
-    {"devid", "device to operate in swframe mode", OFFSET(devid), AV_OPT_TYPE_INT, {.i64 = 0}, -1, INT_MAX, .flags = FLAGS, "range"},
-    {"level", "Specify a custom session keep alive timeout in seconds.", OFFSET(level), AV_OPT_TYPE_INT, {.i64 = 2}, 1, 2, FLAGS, "level"},
-    {"keep_alive_timeout", "Specify a custom session keep alive timeout in seconds.", OFFSET(keep_alive_timeout),
-      AV_OPT_TYPE_INT, {.i64 = NI_HVSPLUS_KEEPALIVE_TIMEOUT}, NI_MIN_KEEP_ALIVE_TIMEOUT, NI_MAX_KEEP_ALIVE_TIMEOUT, FLAGS, "keep_alive_timeout"},
-    {"mode", "Specify the processing channel of the network, 0: YUV channels, 1: Y channel only", OFFSET(channel_mode), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1},
-    {"buffer_limit", "Whether to limit output buffering count, 0: no, 1: yes", OFFSET(buffer_limit), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1},
-    {"timeout", "Specify a custom timeout in seconds.", OFFSET(ai_timeout),
-      AV_OPT_TYPE_INT, {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT}, NI_MIN_KEEP_ALIVE_TIMEOUT, NI_MAX_KEEP_ALIVE_TIMEOUT, FLAGS, "keep_alive_timeout"},
-    {"width", "Specify the output frame width.", OFFSET(out_width), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 8192, FLAGS, "width"},
-    {"height", "Specify the output frame height.", OFFSET(out_height), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 8192, FLAGS, "height"},
-    {NULL}
+    { "devid",   "device to operate in swframe mode", OFFSET(devid),        AV_OPT_TYPE_INT, {.i64 = 0},  -1, INT_MAX,                  FLAGS },
+    { "level",   "level of modification",             OFFSET(level),        AV_OPT_TYPE_INT, {.i64 = 2},  1,  2,                        FLAGS },
+    { "width",   "Specify the output frame width.",   OFFSET(out_width),    AV_OPT_TYPE_INT, {.i64 = -1}, -1, NI_MAX_RESOLUTION_WIDTH,  FLAGS },
+    { "height",  "Specify the output frame height.",  OFFSET(out_height),   AV_OPT_TYPE_INT, {.i64 = -1}, -1, NI_MAX_RESOLUTION_HEIGHT, FLAGS },
+    { "mode",    "filter mode",                       OFFSET(channel_mode), AV_OPT_TYPE_INT, {.i64 = 0},  0,  1,                        FLAGS, "mode" },
+        { "YUV",    "process channels Y, U, and V", 0, AV_OPT_TYPE_CONST, {.i64 = 0}, 0, 0, FLAGS, "mode" },
+        { "Y_only", "process only channel Y",       0, AV_OPT_TYPE_CONST, {.i64 = 1}, 0, 0, FLAGS, "mode" },
+    { "timeout", "Timeout for AI operations",         OFFSET(ai_timeout),   AV_OPT_TYPE_INT,  {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT}, NI_MIN_KEEP_ALIVE_TIMEOUT, NI_MAX_KEEP_ALIVE_TIMEOUT, FLAGS, "AI_timeout" },
+    NI_FILT_OPTION_KEEPALIVE10,
+    NI_FILT_OPTION_BUFFER_LIMIT,
+    { NULL }
 };
 
-static const AVClass ni_hvsplus_class = {
-    .class_name = "ni_hvsplus",
-    .item_name  = av_default_item_name,
-    .option     = ni_hvsplus_options,
-    .version    = LIBAVUTIL_VERSION_INT,
-    .category   = AV_CLASS_CATEGORY_FILTER,
-    //    .child_class_next = child_class_next,
-};
+AVFILTER_DEFINE_CLASS(ni_hvsplus);
 
-static const AVFilterPad avfilter_vf_hvsplus_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = ni_hvsplus_filter_frame,
+        .filter_frame = filter_frame,
         //.config_props = config_input,
     },
 #if (LIBAVFILTER_VERSION_MAJOR < 8)
@@ -1819,11 +1831,11 @@ static const AVFilterPad avfilter_vf_hvsplus_inputs[] = {
 #endif
 };
 
-static const AVFilterPad avfilter_vf_hvsplus_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .config_props = ni_hvsplus_output_config_props,
+        .config_props = output_config_props,
     },
 #if (LIBAVFILTER_VERSION_MAJOR < 8)
     {NULL}
@@ -1833,18 +1845,18 @@ static const AVFilterPad avfilter_vf_hvsplus_outputs[] = {
 AVFilter ff_vf_hvsplus_ni_quadra = {
     .name           = "ni_quadra_hvsplus",
     .description    = NULL_IF_CONFIG_SMALL("NETINT Quadra hvsplus v" NI_XCODER_REVISION),
-    .init           = ni_hvsplus_init,
-    .uninit         = ni_hvsplus_uninit,
+    .init           = init,
+    .uninit         = uninit,
     .priv_size      = sizeof(NetIntHvsplusContext),
     .priv_class     = &ni_hvsplus_class,
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
-    FILTER_INPUTS(avfilter_vf_hvsplus_inputs),
-    FILTER_OUTPUTS(avfilter_vf_hvsplus_outputs),
-    FILTER_QUERY_FUNC(ni_hvsplus_query_formats),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
+    FILTER_QUERY_FUNC(query_formats),
 #else
-    .inputs         = avfilter_vf_hvsplus_inputs,
-    .outputs        = avfilter_vf_hvsplus_outputs,
-    .query_formats  = ni_hvsplus_query_formats,
+    .inputs         = inputs,
+    .outputs        = outputs,
+    .query_formats  = query_formats,
 #endif
 };

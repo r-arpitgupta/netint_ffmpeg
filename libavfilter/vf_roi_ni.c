@@ -194,6 +194,14 @@ static int get_yolo_detections(void *ctx, ni_roi_network_layer_t *l, int netw,
     // if (l.batch == 2) avg_flipped_yolo(l);
     int count       = 0;
     detection *dets = det_cache->dets;
+    int row;
+    int col;
+    int obj_index;
+    float objectness;
+    int class_index;
+    double prob;
+    int box_index;
+    box bbox;
 
     *dets_num = 0;
 
@@ -201,19 +209,19 @@ static int get_yolo_detections(void *ctx, ni_roi_network_layer_t *l, int netw,
            "pic %dx%d, comp=%d, class=%d, net %dx%d, thresh=%f\n", l->width,
            l->height, l->component, l->classes, netw, neth, thresh);
     for (i = 0; i < l->width * l->height; ++i) {
-        int row = i / l->width;
-        int col = i % l->width;
+        row = i / l->width;
+        col = i % l->width;
         for (n = 0; n < l->component; ++n) {
-            int obj_index = entry_index(l, 0, n * l->width * l->height + i, 4);
-            float objectness = predictions[obj_index];
+            obj_index = entry_index(l, 0, n * l->width * l->height + i, 4);
+            objectness = predictions[obj_index];
             objectness       = sigmoid(objectness);
 
             prob_class = -1;
             max_prob   = thresh;
             for (k = 0; k < l->classes; k++) {
-                int class_index =
+                class_index =
                     entry_index(l, 0, n * l->width * l->height + i, 4 + 1 + k);
-                double prob = objectness * sigmoid(predictions[class_index]);
+                prob = objectness * sigmoid(predictions[class_index]);
                 if (prob >= max_prob) {
                     prob_class = k;
                     max_prob   = (float)prob;
@@ -221,8 +229,7 @@ static int get_yolo_detections(void *ctx, ni_roi_network_layer_t *l, int netw,
             }
 
             if (prob_class >= 0) {
-                box bbox;
-                int box_index =
+                box_index =
                     entry_index(l, 0, n * l->width * l->height + i, 0);
 
                 if (det_cache->dets_num >= det_cache->capacity) {
@@ -335,9 +342,10 @@ static int nms_sort(void *ctx, detection *dets, int dets_num, float nms_thresh)
 {
     int i, j;
     box boxa, boxb;
+    int class;
 
     for (i = 0; i < (dets_num - 1); i++) {
-        int class = dets[i].prob_class;
+        class = dets[i].prob_class;
         if (dets[i].max_prob == 0)
             continue;
 
@@ -482,15 +490,15 @@ static int ni_get_detections(void *ctx, ni_roi_network_t *network,
     return 0;
 }
 
-static int ni_roi_query_formats(AVFilterContext *ctx)
+static int query_formats(AVFilterContext *ctx)
 {
-    AVFilterFormats *formats;
-
     static const enum AVPixelFormat pix_fmts[] = {
         AV_PIX_FMT_NI_QUAD,
         AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_NONE,
     };
+
+    AVFilterFormats *formats;
 
     formats = ff_make_format_list(pix_fmts);
     if (!formats)
@@ -515,20 +523,16 @@ static void cleanup_ai_context(AVFilterContext *ctx, NetIntRoiContext *s)
                    "%s: failed to close ai session. retval %d\n", __func__,
                    retval);
         }
-        if (!s->hws_ctx)
-        {
+        if (!s->hws_ctx) {
 #ifdef _WIN32
-            if (ai_ctx->api_ctx.device_handle != NI_INVALID_DEVICE_HANDLE)
-            {
+            if (ai_ctx->api_ctx.device_handle != NI_INVALID_DEVICE_HANDLE) {
                 ni_device_close(ai_ctx->api_ctx.device_handle);
             }
 #elif __linux__
-            if (ai_ctx->api_ctx.device_handle != NI_INVALID_DEVICE_HANDLE)
-            {
+            if (ai_ctx->api_ctx.device_handle != NI_INVALID_DEVICE_HANDLE) {
                 ni_device_close(ai_ctx->api_ctx.device_handle);
             }
-            if (ai_ctx->api_ctx.blk_io_handle != NI_INVALID_DEVICE_HANDLE)
-            {
+            if (ai_ctx->api_ctx.blk_io_handle != NI_INVALID_DEVICE_HANDLE) {
                 ni_device_close(ai_ctx->api_ctx.blk_io_handle);
             }
 #endif
@@ -549,6 +553,9 @@ static int init_ai_context(AVFilterContext *ctx, NetIntRoiContext *s,
     ni_roi_network_t *network = &s->network;
     int ret;
     int hwframe = frame->format == AV_PIX_FMT_NI_QUAD ? 1 : 0;
+    int cardno;
+    AVHWFramesContext *pAVHFWCtx;
+    AVNIDeviceContext *pAVNIDevCtx;
 
 #if HAVE_IO_H
     if ((s->nb_file == NULL) || (_access(s->nb_file, R_OK) != 0)) {
@@ -572,9 +579,6 @@ static int init_ai_context(AVFilterContext *ctx, NetIntRoiContext *s,
     }
 
     if (hwframe) {
-        AVHWFramesContext *pAVHFWCtx;
-        AVNIDeviceContext *pAVNIDevCtx;
-        int cardno;
 
         pAVHFWCtx   = (AVHWFramesContext *)frame->hw_frames_ctx->data;
         pAVNIDevCtx = (AVNIDeviceContext *)pAVHFWCtx->device_ctx->hwctx;
@@ -584,8 +588,9 @@ static int init_ai_context(AVFilterContext *ctx, NetIntRoiContext *s,
         ai_ctx->api_ctx.blk_io_handle = pAVNIDevCtx->cards[cardno];
         ai_ctx->api_ctx.hw_action     = NI_CODEC_HW_ENABLE;
         ai_ctx->api_ctx.hw_id         = cardno;
-    } else
+    } else {
         ai_ctx->api_ctx.hw_id = s->devid;
+    }
 
     ai_ctx->api_ctx.device_type = NI_DEVICE_TYPE_AI;
     ai_ctx->api_ctx.keep_alive_timeout = s->keep_alive_timeout;
@@ -633,8 +638,8 @@ failed_out:
 
 static void ni_destroy_network(AVFilterContext *ctx, ni_roi_network_t *network)
 {
+    int i;
     if (network) {
-        int i;
 
         if (network->layers) {
             for (i = 0; i < network->raw.output_num; i++) {
@@ -801,10 +806,52 @@ static void cleanup_hwframe_scale(AVFilterContext *ctx, NetIntRoiContext *s)
     }
 }
 
-static int ni_roi_config_input(AVFilterContext *ctx, AVFrame *frame)
+static av_cold int init(AVFilterContext *ctx)
+{
+    NetIntRoiContext *s = ctx->priv;
+
+    s->det_cache.dets_num = 0;
+    s->det_cache.capacity = 20;
+    s->det_cache.dets     = malloc(sizeof(detection) * s->det_cache.capacity);
+    if (!s->det_cache.dets) {
+        av_log(ctx, AV_LOG_ERROR, "failed to allocate detection cache\n");
+        return AVERROR(ENOMEM);
+    }
+
+    return 0;
+}
+
+static av_cold void uninit(AVFilterContext *ctx)
+{
+    NetIntRoiContext *s       = ctx->priv;
+    ni_roi_network_t *network = &s->network;
+
+    cleanup_ai_context(ctx, s);
+
+    ni_destroy_network(ctx, network);
+
+    if (s->det_cache.dets) {
+        free(s->det_cache.dets);
+        s->det_cache.dets = NULL;
+    }
+
+    av_buffer_unref(&s->out_frames_ref);
+    s->out_frames_ref = NULL;
+
+    av_frame_unref(&s->rgb_picture);
+    sws_freeContext(s->img_cvt_ctx);
+    s->img_cvt_ctx = NULL;
+
+    cleanup_hwframe_scale(ctx, s);
+}
+
+static int config_input(AVFilterContext *ctx, AVFrame *frame)
 {
     NetIntRoiContext *s = ctx->priv;
     int ret;
+    AVHWFramesContext *in_frames_ctx;
+    AVHWFramesContext *out_frames_ctx;
+    AVNIFramesContext *out_ni_ctx;
 
     if (s->initialized)
         return 0;
@@ -848,9 +895,9 @@ static int ni_roi_config_input(AVFilterContext *ctx, AVFrame *frame)
             goto fail_out;
         }
 
-        AVHWFramesContext *in_frames_ctx = (AVHWFramesContext *)frame->hw_frames_ctx->data;
-        AVHWFramesContext *out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
-        AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+        in_frames_ctx = (AVHWFramesContext *)frame->hw_frames_ctx->data;
+        out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
+        out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
         ni_cpy_hwframe_ctx(in_frames_ctx, out_frames_ctx);
         ni_device_session_copy(&s->ai_ctx->api_ctx, &out_ni_ctx->api_ctx);
     }
@@ -871,52 +918,14 @@ fail_out:
     return ret;
 }
 
-static av_cold int ni_roi_init(AVFilterContext *ctx)
-{
-    NetIntRoiContext *s = ctx->priv;
-
-    s->det_cache.dets_num = 0;
-    s->det_cache.capacity = 20;
-    s->det_cache.dets     = malloc(sizeof(detection) * s->det_cache.capacity);
-    if (!s->det_cache.dets) {
-        av_log(ctx, AV_LOG_ERROR, "failed to allocate detection cache\n");
-        return AVERROR(ENOMEM);
-    }
-
-    return 0;
-}
-
-static av_cold void ni_roi_uninit(AVFilterContext *ctx)
-{
-    NetIntRoiContext *s       = ctx->priv;
-    ni_roi_network_t *network = &s->network;
-
-    cleanup_ai_context(ctx, s);
-
-    ni_destroy_network(ctx, network);
-
-    if (s->det_cache.dets) {
-        free(s->det_cache.dets);
-        s->det_cache.dets = NULL;
-    }
-
-    av_buffer_unref(&s->out_frames_ref);
-    s->out_frames_ref = NULL;
-
-    av_frame_unref(&s->rgb_picture);
-    sws_freeContext(s->img_cvt_ctx);
-    s->img_cvt_ctx = NULL;
-
-    cleanup_hwframe_scale(ctx, s);
-}
-
-static int ni_roi_output_config_props(AVFilterLink *outlink)
+static int output_config_props(AVFilterLink *outlink)
 {
     AVFilterContext *ctx = outlink->src;
     AVFilterLink *inlink = outlink->src->inputs[0];
     AVHWFramesContext *in_frames_ctx;
     AVHWFramesContext *out_frames_ctx;
     NetIntRoiContext *s = ctx->priv;
+    AVNIFramesContext *out_ni_ctx;
 
 #if IS_FFMPEG_71_AND_ABOVE
     FilterLink *li = ff_filter_link(inlink);
@@ -961,7 +970,7 @@ static int ni_roi_output_config_props(AVFilterLink *outlink)
 
     out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
 
-    AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+    out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
     ni_cpy_hwframe_ctx(in_frames_ctx, out_frames_ctx);
     ni_device_session_copy(&s->ai_ctx->api_ctx, &out_ni_ctx->api_ctx);
 
@@ -1002,7 +1011,7 @@ static int ni_read_roi(AVFilterContext *ctx, ni_session_data_io_t *p_dst_pkt,
     AVRegionOfInterest *roi;
     AVRegionOfInterestNetintExtra *roi_extra;
     struct roi_box *roi_box = NULL;
-    int roi_num             = 0;
+    int roi_num = 0;
     int ret;
     int i;
     int width, height;
@@ -1071,6 +1080,17 @@ static int ni_read_roi(AVFilterContext *ctx, ni_session_data_io_t *p_dst_pkt,
 static int ni_recreate_frame(ni_frame_t *ni_frame, AVFrame *frame)
 {
     uint8_t *p_data = ni_frame->p_data[0];
+    int i;
+    uint8_t *r_data ;
+    uint8_t *g_data ;
+    uint8_t *b_data ;
+    uint8_t *fdata  ;
+    int x, y;
+    int fpos;
+    int ppos;
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
 
     av_log(NULL, AV_LOG_DEBUG,
            "linesize %d/%d/%d, data %p/%p/%p, pixel %dx%d\n",
@@ -1079,7 +1099,6 @@ static int ni_recreate_frame(ni_frame_t *ni_frame, AVFrame *frame)
            frame->height);
 
     if (frame->format == AV_PIX_FMT_GBRP) {
-        int i;
         /* GBRP -> BGRP */
         for (i = 0; i < frame->height; i++) {
             memcpy((void *)(p_data + i * frame->linesize[1]),
@@ -1099,11 +1118,10 @@ static int ni_recreate_frame(ni_frame_t *ni_frame, AVFrame *frame)
         }
     } else if (frame->format == AV_PIX_FMT_RGB24) {
         /* RGB24 -> BGRP */
-        uint8_t *r_data = p_data + frame->width * frame->height * 2;
-        uint8_t *g_data = p_data + frame->width * frame->height * 1;
-        uint8_t *b_data = p_data + frame->width * frame->height * 0;
-        uint8_t *fdata  = frame->data[0];
-        int x, y;
+        r_data = p_data + frame->width * frame->height * 2;
+        g_data = p_data + frame->width * frame->height * 1;
+        b_data = p_data + frame->width * frame->height * 0;
+        fdata  = frame->data[0];
 
         av_log(NULL, AV_LOG_DEBUG,
                "%s(): rgb24 to bgrp, pix %dx%d, linesize %d\n", __func__,
@@ -1111,11 +1129,11 @@ static int ni_recreate_frame(ni_frame_t *ni_frame, AVFrame *frame)
 
         for (y = 0; y < frame->height; y++) {
             for (x = 0; x < frame->width; x++) {
-                int fpos  = y * frame->linesize[0];
-                int ppos  = y * frame->width;
-                uint8_t r = fdata[fpos + x * 3 + 0];
-                uint8_t g = fdata[fpos + x * 3 + 1];
-                uint8_t b = fdata[fpos + x * 3 + 2];
+                fpos  = y * frame->linesize[0];
+                ppos  = y * frame->width;
+                r = fdata[fpos + x * 3 + 0];
+                g = fdata[fpos + x * 3 + 1];
+                b = fdata[fpos + x * 3 + 2];
 
                 r_data[ppos + x] = r;
                 g_data[ppos + x] = g;
@@ -1189,7 +1207,7 @@ static int ni_hwframe_scale(AVFilterContext *ctx, NetIntRoiContext *s,
     return 0;
 }
 
-static int ni_roi_filter_frame(AVFilterLink *link, AVFrame *in)
+static int filter_frame(AVFilterLink *link, AVFrame *in)
 {
     AVFilterContext *ctx = link->dst;
     NetIntRoiContext *s  = ctx->priv;
@@ -1205,7 +1223,7 @@ static int ni_roi_filter_frame(AVFilterLink *link, AVFrame *in)
     }
 
     if (!s->initialized) {
-        ret = ni_roi_config_input(ctx, in);
+        ret = config_input(ctx, in);
         if (ret) {
             av_log(ctx, AV_LOG_ERROR, "failed to config input\n");
             goto failed_out;
@@ -1223,8 +1241,7 @@ static int ni_roi_filter_frame(AVFilterLink *link, AVFrame *in)
     }
 
     out = av_frame_clone(in);
-    if (!out)
-    {
+    if (!out) {
         ret = AVERROR(ENOMEM);
         goto failed_out;
     }
@@ -1364,22 +1381,16 @@ static int activate(AVFilterContext *ctx)
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
-    if (ff_inlink_check_available_frame(inlink))
-    {
-        if (s->initialized)
-        {
-            if (s->hws_ctx)
-            {
+    if (ff_inlink_check_available_frame(inlink)) {
+        if (s->initialized) {
+            if (s->hws_ctx) {
                 ret = ni_device_session_query_buffer_avail(&s->hws_ctx->api_ctx, NI_DEVICE_TYPE_SCALER);
             }
         }
 
-        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
-        {
+        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION) {
             av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
-        }
-        else if (ret < 0)
-        {
+        } else if (ret < 0) {
             av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %u available_frame %d outlink framequeue %u frame_wanted %d - return NOT READY\n",
                 __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
             return FFERROR_NOT_READY;
@@ -1389,7 +1400,11 @@ static int activate(AVFilterContext *ctx)
         if (ret < 0)
             return ret;
 
-        return ni_roi_filter_frame(inlink, frame);
+        ret = filter_frame(inlink, frame);
+        if (ret >= 0) {
+            ff_filter_set_ready(ctx, 300);
+        }
+        return ret;
     }
 
     // We did not get a frame from input link, check its status
@@ -1405,91 +1420,34 @@ static int activate(AVFilterContext *ctx)
 #define OFFSET(x) offsetof(NetIntRoiContext, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_FILTERING_PARAM)
 
-static const AVOption ni_roi_options[] = {{"nb", "path to network binary file",
-                                           OFFSET(nb_file), AV_OPT_TYPE_STRING,
-                                           .flags = FLAGS},
-                                          {"qpoffset",
-                                           "qp offset ratio",
-                                           OFFSET(qp_offset),
-                                           AV_OPT_TYPE_RATIONAL,
-                                           {.dbl = 0},
-                                           -1.0,
-                                           1.0,
-                                           .flags = FLAGS,
-                                           "range"},
-                                          {"devid",
-                                           "device to operate in swframe mode",
-                                           OFFSET(devid),
-                                           AV_OPT_TYPE_INT,
-                                           {.i64 = 0},
-                                           -1,
-                                           INT_MAX,
-                                           .flags = FLAGS,
-                                           "range"},
-                                          {"obj_thresh",
-                                           "objectness thresh",
-                                           OFFSET(obj_thresh),
-                                           AV_OPT_TYPE_FLOAT,
-                                           {.dbl = 0.25},
-                                           -FLT_MAX,
-                                           FLT_MAX,
-                                           .flags = FLAGS,
-                                           "range"},
-                                          {"nms_thresh",
-                                           "nms thresh",
-                                           OFFSET(nms_thresh),
-                                           AV_OPT_TYPE_FLOAT,
-                                           {.dbl = 0.45},
-                                           -FLT_MAX,
-                                           FLT_MAX,
-                                           .flags = FLAGS,
-                                           "range"},
+static const AVOption ni_roi_options[] = {
+    { "nb",         "path to network binary file",              OFFSET(nb_file),    AV_OPT_TYPE_STRING,   {.str = NULL}, 0,        0,        FLAGS },
+    { "qpoffset",   "qp offset ratio",                          OFFSET(qp_offset),  AV_OPT_TYPE_RATIONAL, {.dbl = 0},    -1.0,     1.0,      FLAGS, "range" },
+    { "devid",      "device to operate in swframe mode",        OFFSET(devid),      AV_OPT_TYPE_INT,      {.i64 = 0},    -1,       INT_MAX,  FLAGS, "range" },
+    { "obj_thresh", "objectness threshold",                     OFFSET(obj_thresh), AV_OPT_TYPE_FLOAT,    {.dbl = 0.25}, -FLT_MAX, FLT_MAX,  FLAGS, "range" },
+    { "nms_thresh", "yolov4 non-maximum suppression threshold", OFFSET(nms_thresh), AV_OPT_TYPE_FLOAT,    {.dbl = 0.45}, -FLT_MAX, FLT_MAX,  FLAGS, "range" },
+    NI_FILT_OPTION_KEEPALIVE,
+    NI_FILT_OPTION_BUFFER_LIMIT,
+{NULL}};
 
-    {"keep_alive_timeout",
-     "Specify a custom session keep alive timeout in seconds.",
-     OFFSET(keep_alive_timeout),
-     AV_OPT_TYPE_INT,
-     {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT},
-     NI_MIN_KEEP_ALIVE_TIMEOUT,
-     NI_MAX_KEEP_ALIVE_TIMEOUT,
-     FLAGS,
-     "keep_alive_timeout"},
+AVFILTER_DEFINE_CLASS(ni_roi);
 
-     {"buffer_limit",
-     "Whether to limit output buffering count, 0: no, 1: yes",
-     OFFSET(buffer_limit),
-     AV_OPT_TYPE_BOOL,
-     {.i64 = 0},
-     0,
-     1},
-
-     {NULL}};
-
-static const AVClass ni_roi_class = {
-    .class_name = "ni_roi",
-    .item_name  = av_default_item_name,
-    .option     = ni_roi_options,
-    .version    = LIBAVUTIL_VERSION_INT,
-    .category   = AV_CLASS_CATEGORY_FILTER,
-    //    .child_class_next = child_class_next,
-};
-
-static const AVFilterPad avfilter_vf_roi_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = ni_roi_filter_frame,
+        .filter_frame = filter_frame,
     },
 #if (LIBAVFILTER_VERSION_MAJOR < 8)
     {NULL}
 #endif
 };
 
-static const AVFilterPad avfilter_vf_roi_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .config_props = ni_roi_output_config_props,
+        .config_props = output_config_props,
     },
 #if (LIBAVFILTER_VERSION_MAJOR < 8)
     {NULL}
@@ -1499,21 +1457,21 @@ static const AVFilterPad avfilter_vf_roi_outputs[] = {
 AVFilter ff_vf_roi_ni_quadra = {
     .name           = "ni_quadra_roi",
     .description    = NULL_IF_CONFIG_SMALL("NETINT Quadra video roi v" NI_XCODER_REVISION),
-    .init           = ni_roi_init,
-    .uninit         = ni_roi_uninit,
+    .init           = init,
+    .uninit         = uninit,
 #if IS_FFMPEG_61_AND_ABOVE
-    .activate      = activate,
+    .activate       = activate,
 #endif
     .priv_size      = sizeof(NetIntRoiContext),
     .priv_class     = &ni_roi_class,
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
-    FILTER_INPUTS(avfilter_vf_roi_inputs),
-    FILTER_OUTPUTS(avfilter_vf_roi_outputs),
-    FILTER_QUERY_FUNC(ni_roi_query_formats),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
+    FILTER_QUERY_FUNC(query_formats),
 #else
-    .inputs         = avfilter_vf_roi_inputs,
-    .outputs        = avfilter_vf_roi_outputs,
-    .query_formats  = ni_roi_query_formats,
+    .inputs         = inputs,
+    .outputs        = outputs,
+    .query_formats  = query_formats,
 #endif
 };

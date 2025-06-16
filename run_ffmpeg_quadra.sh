@@ -47,7 +47,7 @@ function check_ffmpeg_cmd() {
         echo -e "\e[31mFAIL: return code is ${1}\e[0m"
     else
         echo -e "\e[32mComplete! ${2} has been generated.\e[0m"
-        check_hash ${2} ${3}	
+        check_hash ${2} ${3}
     fi
 }
 

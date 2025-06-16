@@ -28,7 +28,7 @@
 #include "formats.h"
 #include "video.h"
 
-#if CONFIG_NI_QUADRA 
+#if CONFIG_NI_QUADRA
 #include "nifilter.h"
 #endif
 
@@ -237,9 +237,9 @@ static int activate(AVFilterContext *ctx)
     AVFilterLink  *inlink = ctx->inputs[0];
     AVFilterLink  *outlink = ctx->outputs[0];
     AVFrame *frame = NULL;
-    int ret;    
+    int ret;
 
-#if CONFIG_NI_QUADRA 
+#if CONFIG_NI_QUADRA
     HWUploadContext *hwctx = ctx->priv;
     ret = 0;
     AVHWFramesContext *hwfc;
@@ -269,7 +269,7 @@ static int activate(AVFilterContext *ctx)
 
 #if CONFIG_NI_QUADRA
         if (!strcmp(type_name, "ni_quadra"))
-	{
+        {
             if (inlink->format != outlink->format)
             {
                 ret = ni_device_session_query_buffer_avail(&ni_ctx->api_ctx, NI_DEVICE_TYPE_UPLOAD);
@@ -284,16 +284,20 @@ static int activate(AVFilterContext *ctx)
                     return FFERROR_NOT_READY;
                 }
             }
-	}
+        }
 #endif
 
         ret = ff_inlink_consume_frame(inlink, &frame);
         if (ret < 0)
             return ret;
- 
-        return hwupload_filter_frame(inlink, frame);
+
+        ret = hwupload_filter_frame(inlink, frame);
+        if (ret >= 0) {
+            ff_filter_set_ready(ctx, 300);
+        }
+        return ret;
     }
-    
+
     // We did not get a frame from input link, check its status
     FF_FILTER_FORWARD_STATUS(inlink, outlink);
 
@@ -341,7 +345,7 @@ const AVFilter ff_vf_hwupload = {
     .uninit        = hwupload_uninit,
 #if IS_FFMPEG_61_AND_ABOVE
     .activate      = activate,
-#endif    
+#endif
     .priv_size     = sizeof(HWUploadContext),
     .priv_class    = &hwupload_class,
     FILTER_INPUTS(hwupload_inputs),

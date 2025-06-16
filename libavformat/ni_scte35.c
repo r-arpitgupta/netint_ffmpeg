@@ -339,6 +339,8 @@ int decode_scte35(ni_scte35_decoder *d, const AVPacket *pkt) {
         data++;
         ret = splice_insert(d, pkt, data, pts_adjustment);
         break;
+    default:
+        break;
     }
 
     return ret;
@@ -381,7 +383,6 @@ unlock:
 
 int is_at_splice_point(ni_scte35_decoder *d, const int64_t pts, const AVRational *pts_timebase) {
     int ret = 0;
-    struct ni_scte35_queue_node *node;
 
     pthread_mutex_lock(&d->lock);
 

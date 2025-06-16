@@ -830,6 +830,8 @@ extern const FFCodec ff_amrwb_mediacodec_decoder;
 extern const FFCodec ff_h263_v4l2m2m_encoder;
 extern const FFCodec ff_libaom_av1_decoder;
 /* hwaccel hooks only, so prefer external decoders */
+extern const FFCodec ff_scte35_ni_dummy_decoder;
+
 extern const FFCodec ff_h264_ni_quadra_decoder;
 extern const FFCodec ff_h265_ni_quadra_decoder;
 extern const FFCodec ff_vp9_ni_quadra_decoder;

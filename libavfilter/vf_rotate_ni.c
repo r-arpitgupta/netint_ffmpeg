@@ -94,54 +94,28 @@ typedef struct NetIntRotContext {
     int buffer_limit;
 } NetIntRotContext;
 
-#define OFFSET(x) offsetof(NetIntRotContext, x)
-#define FLAGS (AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM)
+static int query_formats(AVFilterContext *ctx)
+{
+    static const enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE };
+    AVFilterFormats *fmts_list = NULL;
 
-static const AVOption rotate_options[] = {
-    { "angle",     "set angle (in radians)",       OFFSET(angle_expr_str), AV_OPT_TYPE_STRING, {.str="0"},     0, 0, FLAGS },
-    { "a",         "set angle (in radians)",       OFFSET(angle_expr_str), AV_OPT_TYPE_STRING, {.str="0"},     0, 0, FLAGS },
-    { "out_w",     "set output width expression",  OFFSET(outw_expr_str),  AV_OPT_TYPE_STRING, {.str="iw"},    0, 0, FLAGS },
-    { "ow",        "set output width expression",  OFFSET(outw_expr_str),  AV_OPT_TYPE_STRING, {.str="iw"},    0, 0, FLAGS },
-    { "out_h",     "set output height expression", OFFSET(outh_expr_str),  AV_OPT_TYPE_STRING, {.str="ih"},    0, 0, FLAGS },
-    { "oh",        "set output height expression", OFFSET(outh_expr_str),  AV_OPT_TYPE_STRING, {.str="ih"},    0, 0, FLAGS },
-    { "fillcolor", "set background fill color",    OFFSET(fillcolor_str),  AV_OPT_TYPE_STRING, {.str="black"}, 0, 0, FLAGS },
-    { "c",         "set background fill color",    OFFSET(fillcolor_str),  AV_OPT_TYPE_STRING, {.str="black"}, 0, 0, FLAGS },
-    { "is_p2p",    "enable p2p transfer",          OFFSET(is_p2p),         AV_OPT_TYPE_BOOL,   {.i64=0},       0, 1, FLAGS },
-    { "auto_skip", "skip the rotate filter when input and output of this filter are the same", OFFSET(auto_skip), AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGS},
-    { "keep_alive_timeout",
-      "specify a custom session keep alive timeout in seconds",
-      OFFSET(keep_alive_timeout),
-      AV_OPT_TYPE_INT64,
-      { .i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT },
-      NI_MIN_KEEP_ALIVE_TIMEOUT,
-      NI_MAX_KEEP_ALIVE_TIMEOUT,
-      FLAGS },
-    { "buffer_limit",
-      "Whether to limit output buffering count, 0: no, 1: yes",
-      OFFSET(buffer_limit),
-      AV_OPT_TYPE_BOOL,
-      {.i64 = 0},
-      0,
-      1},
-    { NULL }
-};
+    fmts_list = ff_make_format_list(pix_fmts);
+    if (!fmts_list) {
+        return AVERROR(ENOMEM);
+    }
 
-AVFILTER_DEFINE_CLASS(rotate);
+    return ff_set_common_formats(ctx, fmts_list);
+}
 
 static av_cold int init(AVFilterContext *ctx)
 {
     NetIntRotContext *rot = ctx->priv;
 
-    if (!strcmp(rot->fillcolor_str, "none"))
-    {
+    if (!strcmp(rot->fillcolor_str, "none")) {
         rot->fillcolor_enable = false;
-    }
-    else if (av_parse_color(rot->fillcolor, rot->fillcolor_str, -1, ctx) >= 0)
-    {
+    } else if (av_parse_color(rot->fillcolor, rot->fillcolor_str, -1, ctx) >= 0) {
         rot->fillcolor_enable = true;
-    }
-    else
-    {
+    } else {
         return AVERROR(EINVAL);
     }
 
@@ -155,13 +129,11 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_expr_free(rot->angle_expr);
     rot->angle_expr = NULL;
 
-    if (rot->api_dst_frame.data.frame.p_buffer)
-    {
+    if (rot->api_dst_frame.data.frame.p_buffer) {
         ni_frame_buffer_free(&rot->api_dst_frame.data.frame);
     }
 
-    if (rot->session_opened)
-    {
+    if (rot->session_opened) {
         /* Close operation will free the device frames */
         ni_device_session_close(&rot->api_ctx, 1, NI_DEVICE_TYPE_SCALER);
         ni_device_session_context_clear(&rot->api_ctx);
@@ -169,20 +141,6 @@ static av_cold void uninit(AVFilterContext *ctx)
 
     av_buffer_unref(&rot->out_frames_ref);
 
-}
-
-static int query_formats(AVFilterContext *ctx)
-{
-    static const enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE };
-    AVFilterFormats *fmts_list = NULL;
-
-    fmts_list = ff_make_format_list(pix_fmts);
-    if (!fmts_list)
-    {
-        return AVERROR(ENOMEM);
-    }
-
-    return ff_set_common_formats(ctx, fmts_list);
 }
 
 static double get_rotated_w(void *opaque, double angle)
@@ -235,6 +193,7 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
     int ret;
     double res;
     char *expr;
+    AVFilterLink *inlink_for_skip;
 
     rot->hsub = pixdesc->log2_chroma_w;
     rot->vsub = pixdesc->log2_chroma_h;
@@ -258,8 +217,7 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
                         NULL,
                         0,
                         ctx);
-    if (ret < 0)
-    {
+    if (ret < 0) {
         av_log(ctx,
                AV_LOG_ERROR,
                "Error occurred parsing angle expression '%s'\n",
@@ -359,43 +317,39 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
            outlink->w, outlink->h, av_get_pix_fmt_name(outlink->format),
            outlink->sample_aspect_ratio.num, outlink->sample_aspect_ratio.den);
 
-    if(rot->auto_skip &&
-       !rot->is_p2p && //the input and output are always on the same card, but filter with p2p always need to be executed
-       av_expr_eval(rot->angle_expr, rot->var_values, rot) == 0 &&
-       in_frames_ctx->width == outlink->w &&
-       in_frames_ctx->height == outlink->h
-      )//skip the color range check
-    {
+    //skip the color range check
+    if (rot->auto_skip &&
+        !rot->is_p2p && //the input and output are always on the same card, but filter with p2p always need to be executed
+        av_expr_eval(rot->angle_expr, rot->var_values, rot) == 0 &&
+        in_frames_ctx->width == outlink->w &&
+        in_frames_ctx->height == outlink->h
+       ) {
         //skip hardware rotate
         rot->skip_filter = 1;
 
 #if IS_FFMPEG_71_AND_ABOVE
         FilterLink *lt = ff_filter_link(outlink->src->inputs[0]);
         rot->out_frames_ref = av_buffer_ref(lt->hw_frames_ctx);
-        if(!rot->out_frames_ref)
-        {
+        if (!rot->out_frames_ref) {
             return AVERROR(ENOMEM);
         }
         FilterLink *lo = ff_filter_link(outlink);
         av_buffer_unref(&lo->hw_frames_ctx);
         lo->hw_frames_ctx = av_buffer_ref(rot->out_frames_ref);
-        if(!lo->hw_frames_ctx)
-        {
+        if (!lo->hw_frames_ctx) {
             return AVERROR(ENOMEM);
         }
 #else
-        AVFilterLink *inlink_for_skip = outlink->src->inputs[0];
+        inlink_for_skip = outlink->src->inputs[0];
 
         rot->out_frames_ref = av_buffer_ref(inlink_for_skip->hw_frames_ctx);
-        if(!rot->out_frames_ref)
-        {
+        if (!rot->out_frames_ref) {
             return AVERROR(ENOMEM);
         }
 
         av_buffer_unref(&outlink->hw_frames_ctx);
         outlink->hw_frames_ctx = av_buffer_ref(rot->out_frames_ref);
-        if(!outlink->hw_frames_ctx)
-        {
+        if (!outlink->hw_frames_ctx) {
             return AVERROR(ENOMEM);
         }
 #endif
@@ -404,8 +358,7 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
 
 
     rot->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
-    if (!rot->out_frames_ref)
-    {
+    if (!rot->out_frames_ref) {
         return AVERROR(ENOMEM);
     }
 
@@ -424,16 +377,14 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
     av_buffer_unref(&lo->hw_frames_ctx);
     lo->hw_frames_ctx = av_buffer_ref(rot->out_frames_ref);
 
-    if (!lo->hw_frames_ctx)
-    {
+    if (!lo->hw_frames_ctx) {
         return AVERROR(ENOMEM);
     }
 #else
     av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
     ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(rot->out_frames_ref);
 
-    if (!ctx->outputs[0]->hw_frames_ctx)
-    {
+    if (!ctx->outputs[0]->hw_frames_ctx) {
         return AVERROR(ENOMEM);
     }
 #endif
@@ -484,19 +435,17 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     int aligned_picture_width, rotated_picture_width, rotated_picture_height;
     double angle;
 
-    if (!frame_surface)
-    {
+    if (!frame_surface) {
         av_log(ctx, AV_LOG_ERROR, "ni rotate filter frame_surface should not be NULL\n");
         return AVERROR(EINVAL);
     }
 
-    if(rot->skip_filter)
-    {//skip hardware rotate
+    //skip hardware rotate
+    if (rot->skip_filter) {
         return ff_filter_frame(outlink, in);
     }
 
-    if (!rot->initialized)
-    {
+    if (!rot->initialized) {
 #if !IS_FFMPEG_342_AND_ABOVE
         retcode = config_props_delayed(outlink, in);
         if (retcode < 0) {
@@ -510,8 +459,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 #endif
 
         ni_retcode = ni_device_session_context_init(&rot->api_ctx);
-        if (ni_retcode != NI_RETCODE_SUCCESS)
-        {
+        if (ni_retcode != NI_RETCODE_SUCCESS) {
             av_log(ctx, AV_LOG_ERROR, "ni rotate filter session context init failed with %d\n", ni_retcode);
             retcode = AVERROR(EINVAL);
             goto FAIL;
@@ -526,8 +474,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         rot->api_ctx.isP2P = rot->is_p2p;
 
         ni_retcode = ni_device_session_open(&rot->api_ctx, NI_DEVICE_TYPE_SCALER);
-        if (ni_retcode != NI_RETCODE_SUCCESS)
-        {
+        if (ni_retcode != NI_RETCODE_SUCCESS) {
             av_log(ctx, AV_LOG_ERROR, "ni rotate filter device session open failed with %d\n", ni_retcode);
             retcode = ni_retcode;
 
@@ -540,8 +487,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         rot->session_opened = true;
 
         ni_retcode = init_out_pool(inlink->dst);
-        if (ni_retcode != NI_RETCODE_SUCCESS)
-        {
+        if (ni_retcode != NI_RETCODE_SUCCESS) {
             av_log(ctx, AV_LOG_ERROR, "ni rotate filter init out pool failed with %d\n", ni_retcode);
             goto FAIL;
         }
@@ -551,8 +497,10 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         ni_cpy_hwframe_ctx(in_frames_context, out_frames_ctx);
         ni_device_session_copy(&rot->api_ctx, &out_ni_ctx->api_ctx);
 
-        if (in->color_range == AVCOL_RANGE_JPEG)
-        {
+        AVHWFramesContext *pAVHFWCtx = (AVHWFramesContext *) in->hw_frames_ctx->data;
+        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pAVHFWCtx->sw_format);
+
+        if ((in->color_range == AVCOL_RANGE_JPEG) && !(desc->flags & AV_PIX_FMT_FLAG_RGB)) {
             av_log(ctx, AV_LOG_WARNING, "Full color range input, limited color output\n");
         }
 
@@ -563,8 +511,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                                              outlink->w,
                                              outlink->h,
                                              0);
-    if (ni_retcode != NI_RETCODE_SUCCESS)
-    {
+    if (ni_retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "ni rotate filter frame buffer alloc hwenc failed with %d\n", ni_retcode);
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -581,8 +528,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     aligned_picture_width = FFALIGN(in->width, BUFFER_WIDTH_PIXEL_ALIGNMENT);
 
     angle = av_expr_eval(rot->angle_expr, rot->var_values, rot);
-    if (angle == 0.0)
-    {
+    if (angle == 0.0) {
         // input_frame_config.orientation = 0; // initialized to zero, unnecessary assignment
         input_frame_config.picture_width = in->width;
         input_frame_config.picture_height = in->height;
@@ -592,9 +538,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
         rotated_picture_width = in->width;
         rotated_picture_height = in->height;
-    }
-    else if ((angle == -M_PI_2 * 3.0) || (angle == M_PI_2)) // -270.0° || 90.0°
-    {
+    } else if ((angle == -M_PI_2 * 3.0) || (angle == M_PI_2)) {
+        // -270.0° || 90.0°
         input_frame_config.orientation = 1;
         input_frame_config.picture_width = aligned_picture_width;
         input_frame_config.picture_height = in->height;
@@ -604,9 +549,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
         rotated_picture_width = in->height;
         rotated_picture_height = aligned_picture_width;
-    }
-    else if ((angle == -M_PI) || (angle == M_PI)) // -180.0° || 180.0°
-    {
+    } else if ((angle == -M_PI) || (angle == M_PI)) {
+        // -180.0° || 180.0°
         input_frame_config.orientation = 2;
         input_frame_config.picture_width = aligned_picture_width;
         input_frame_config.picture_height = in->height;
@@ -616,9 +560,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
         rotated_picture_width = aligned_picture_width;
         rotated_picture_height = in->height;
-    }
-    else if ((angle == -M_PI_2) || (angle == M_PI_2 * 3.0)) // -90.0° || 270.0°
-    {
+    } else if ((angle == -M_PI_2) || (angle == M_PI_2 * 3.0)) {
+        // -90.0° || 270.0°
         input_frame_config.orientation = 3;
         input_frame_config.picture_width = aligned_picture_width;
         input_frame_config.picture_height = in->height;
@@ -628,9 +571,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
         rotated_picture_width = in->height;
         rotated_picture_height = aligned_picture_width;
-    }
-    else
-    {
+    } else {
         av_log(ctx, AV_LOG_ERROR, "ni rotate filter does not support rotation of %.1f radians\n", angle);
         retcode = AVERROR(EINVAL);
         goto FAIL;
@@ -642,10 +583,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     input_frame_config.rectangle_y =
         (rotated_picture_height > input_frame_config.rectangle_height) ?
         (rotated_picture_height / 2) - (input_frame_config.rectangle_height / 2) : 0;
-    if (aligned_picture_width - in->width)
-    {
-        switch (input_frame_config.orientation)
-        {
+    if (aligned_picture_width - in->width) {
+        switch (input_frame_config.orientation) {
         case 1: // 90°
             input_frame_config.rectangle_y =
                 (in->width > input_frame_config.rectangle_height) ?
@@ -663,6 +602,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                 ((in->width > input_frame_config.rectangle_height) ?
                  (in->width / 2) - (input_frame_config.rectangle_height / 2) : 0);
             break;
+        default:
+            break;
         }
     }
 
@@ -673,8 +614,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     // use ni_device_config_frame() instead of ni_device_alloc_frame()
     // such that input_frame_config's orientation can be configured
     ni_retcode = ni_device_config_frame(&rot->api_ctx, &input_frame_config);
-    if (ni_retcode != NI_RETCODE_SUCCESS)
-    {
+    if (ni_retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "ni rotate filter device config input frame failed with %d\n", ni_retcode);
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -682,8 +622,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     // Output.
 
-    if (rot->fillcolor_enable)
-    {
+    if (rot->fillcolor_enable) {
         rgba_color = (rot->fillcolor[3] << 24) |
                      (rot->fillcolor[0] << 16) |
                      (rot->fillcolor[1] <<  8) |
@@ -715,16 +654,14 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                                        -1,
                                        NI_DEVICE_TYPE_SCALER);
 
-    if (ni_retcode != NI_RETCODE_SUCCESS)
-    {
+    if (ni_retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "ni rotate filter device alloc output frame failed with %d\n", ni_retcode);
         retcode = AVERROR(ENOMEM);
         goto FAIL;
     }
 
     out = av_frame_alloc();
-    if (!out)
-    {
+    if (!out) {
         av_log(ctx, AV_LOG_ERROR, "ni rotate filter av_frame_alloc returned NULL\n");
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -739,8 +676,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     out->hw_frames_ctx = av_buffer_ref(out_buffer_ref);
     out->data[3] = av_malloc(sizeof(niFrameSurface1_t));
-    if (!out->data[3])
-    {
+    if (!out->data[3]) {
         av_log(ctx, AV_LOG_ERROR, "ni rotate filter av_alloc returned NULL\n");
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -750,8 +686,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     ni_retcode = ni_device_session_read_hwdesc(&rot->api_ctx,
                                                &rot->api_dst_frame,
                                                NI_DEVICE_TYPE_SCALER);
-    if (ni_retcode != NI_RETCODE_SUCCESS)
-    {
+    if (ni_retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "ni rotate filter read hwdesc failed with %d\n", ni_retcode);
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -782,8 +717,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                                    ff_ni_frame_free,
                                    NULL,
                                    0);
-    if (!out->buf[0])
-    {
+    if (!out->buf[0]) {
         av_log(ctx, AV_LOG_ERROR, "ni rotate filter av_buffer_create returned NULL\n");
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -811,19 +745,14 @@ static int activate(AVFilterContext *ctx)
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
-    if (ff_inlink_check_available_frame(inlink))
-    {
-        if (s->initialized)
-        {
+    if (ff_inlink_check_available_frame(inlink)) {
+        if (s->initialized) {
             ret = ni_device_session_query_buffer_avail(&s->api_ctx, NI_DEVICE_TYPE_SCALER);
         }
 
-        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
-        {
+        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION) {
             av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
-        }
-        else if (ret < 0)
-        {
+        } else if (ret < 0) {
             av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %u available_frame %d outlink framequeue %u frame_wanted %d - return NOT READY\n",
                 __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
             return FFERROR_NOT_READY;
@@ -833,7 +762,11 @@ static int activate(AVFilterContext *ctx)
         if (ret < 0)
             return ret;
 
-        return filter_frame(inlink, frame);
+        ret = filter_frame(inlink, frame);
+        if (ret >= 0) {
+            ff_filter_set_ready(ctx, 300);
+        }
+        return ret;
     }
 
     // We did not get a frame from input link, check its status
@@ -846,10 +779,31 @@ static int activate(AVFilterContext *ctx)
 }
 #endif
 
-static const AVFilterPad avfilter_vf_rotate_inputs[] = {
+#define OFFSET(x) offsetof(NetIntRotContext, x)
+#define FLAGS (AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM)
+
+static const AVOption ni_rotate_options[] = {
+    { "angle",     "set angle (in radians)",       OFFSET(angle_expr_str), AV_OPT_TYPE_STRING, {.str="0"},     0, 0, FLAGS },
+    { "a",         "set angle (in radians)",       OFFSET(angle_expr_str), AV_OPT_TYPE_STRING, {.str="0"},     0, 0, FLAGS },
+    { "out_w",     "set output width expression",  OFFSET(outw_expr_str),  AV_OPT_TYPE_STRING, {.str="iw"},    0, 0, FLAGS },
+    { "ow",        "set output width expression",  OFFSET(outw_expr_str),  AV_OPT_TYPE_STRING, {.str="iw"},    0, 0, FLAGS },
+    { "out_h",     "set output height expression", OFFSET(outh_expr_str),  AV_OPT_TYPE_STRING, {.str="ih"},    0, 0, FLAGS },
+    { "oh",        "set output height expression", OFFSET(outh_expr_str),  AV_OPT_TYPE_STRING, {.str="ih"},    0, 0, FLAGS },
+    { "fillcolor", "set background fill color",    OFFSET(fillcolor_str),  AV_OPT_TYPE_STRING, {.str="black"}, 0, 0, FLAGS },
+    { "c",         "set background fill color",    OFFSET(fillcolor_str),  AV_OPT_TYPE_STRING, {.str="black"}, 0, 0, FLAGS },
+    NI_FILT_OPTION_AUTO_SKIP,
+    NI_FILT_OPTION_IS_P2P,
+    NI_FILT_OPTION_KEEPALIVE,
+    NI_FILT_OPTION_BUFFER_LIMIT,
+    { NULL }
+};
+
+AVFILTER_DEFINE_CLASS(ni_rotate);
+
+static const AVFilterPad inputs[] = {
     {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
+        .name         = "default",
+        .type         = AVMEDIA_TYPE_VIDEO,
         .filter_frame = filter_frame,
     },
 #if (LIBAVFILTER_VERSION_MAJOR < 8)
@@ -857,10 +811,10 @@ static const AVFilterPad avfilter_vf_rotate_inputs[] = {
 #endif
 };
 
-static const AVFilterPad avfilter_vf_rotate_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
+        .name         = "default",
+        .type         = AVMEDIA_TYPE_VIDEO,
 #if IS_FFMPEG_342_AND_ABOVE
         .config_props = config_props,
 #endif
@@ -871,24 +825,24 @@ static const AVFilterPad avfilter_vf_rotate_outputs[] = {
 };
 
 AVFilter ff_vf_rotate_ni_quadra = {
-    .name        = "ni_quadra_rotate",
-    .description = NULL_IF_CONFIG_SMALL(
+    .name           = "ni_quadra_rotate",
+    .description    = NULL_IF_CONFIG_SMALL(
         "NETINT Quadra rotate the input video v" NI_XCODER_REVISION),
-    .priv_size  = sizeof(NetIntRotContext),
-    .priv_class = &rotate_class,
-    .init       = init,
-    .uninit     = uninit,
+    .priv_size      = sizeof(NetIntRotContext),
+    .priv_class     = &ni_rotate_class,
+    .init           = init,
+    .uninit         = uninit,
 #if IS_FFMPEG_61_AND_ABOVE
-    .activate      = activate,
+    .activate       = activate,
 #endif
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
     FILTER_QUERY_FUNC(query_formats),
-    FILTER_INPUTS(avfilter_vf_rotate_inputs),
-    FILTER_OUTPUTS(avfilter_vf_rotate_outputs),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
 #else
-    .query_formats = query_formats,
-    .inputs        = avfilter_vf_rotate_inputs,
-    .outputs       = avfilter_vf_rotate_outputs,
+    .query_formats  = query_formats,
+    .inputs         = inputs,
+    .outputs        = outputs,
 #endif
 // only FFmpeg 3.4.2 and above have .flags_internal
 #if IS_FFMPEG_342_AND_ABOVE

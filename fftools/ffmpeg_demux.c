@@ -55,6 +55,7 @@ typedef struct DemuxStream {
     int                      decoding_needed;
 #define DECODING_FOR_OST    1
 #define DECODING_FOR_FILTER 2
+#define DECODING_FOR_SCTE35 4
 
     /* true if stream data should be discarded */
     int                      discard;
@@ -911,6 +912,11 @@ static int ist_use(InputStream *ist, int decoding_needed,
     ist->st->discard      = ist->user_set_discard;
     ds->decoding_needed   |= decoding_needed;
     ds->streamcopy_needed |= !decoding_needed;
+
+    if (!decoding_needed && ist->par->codec_id == AV_CODEC_ID_SCTE_35) {
+        decoding_needed = 1;
+        ds->decoding_needed |= DECODING_FOR_SCTE35;
+    }
 
     if (decoding_needed && ds->sch_idx_dec < 0) {
         int is_audio = ist->st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO;

@@ -36,6 +36,10 @@
 
 #include "ffmpeg.h"
 
+#include "libavformat/ni_scte35.h"
+
+ni_scte35_decoder *scte35_decoder = NULL;
+
 typedef struct DecoderPriv {
     Decoder             dec;
 
@@ -702,6 +706,19 @@ static int packet_decode(DecoderPriv *dp, AVPacket *pkt, AVFrame *frame)
 
     if (dec->codec_type == AVMEDIA_TYPE_SUBTITLE)
         return transcode_subtitles(dp, pkt, frame);
+    else if (dec->codec_type == AVMEDIA_TYPE_DATA &&
+             dec->codec_id == AV_CODEC_ID_SCTE_35) {
+        if (!scte35_decoder) {
+            scte35_decoder = ff_alloc_ni_scte35_decoder();
+            if (!scte35_decoder) {
+                av_log(dp, AV_LOG_ERROR, "Error allocating scte-35 decoder.\n");
+                return AVERROR(ENOMEM);
+            }
+        }
+
+        av_log(dp, AV_LOG_VERBOSE, "Decoding SCTE-35 pkt !\n");
+        return decode_scte35(scte35_decoder, pkt);
+    }
 
     // With fate-indeo3-2, we're getting 0-sized packets before EOF for some
     // reason. This seems like a semi-critical bug. Don't trigger EOF, and
@@ -783,6 +800,13 @@ static int packet_decode(DecoderPriv *dp, AVPacket *pkt, AVFrame *frame)
         fd->dec.tb                  = dec->pkt_timebase;
         fd->dec.frame_num           = dec->frame_num - 1;
         fd->bits_per_raw_sample     = dec->bits_per_raw_sample;
+
+        if (dec->codec_type == AVMEDIA_TYPE_VIDEO && scte35_decoder) {
+            fd->is_scte35_keyframe  = is_scte35_keyframe(scte35_decoder, frame->pts, &dec->pkt_timebase);
+            if (fd->is_scte35_keyframe) {
+                av_log(NULL, AV_LOG_VERBOSE, "frame %" PRIu64 " is_scte35_keyframe\n", fd->dec.frame_num);
+            }
+        }
 
         fd->wallclock[LATENCY_PROBE_DEC_POST] = av_gettime_relative();
 
@@ -1018,6 +1042,10 @@ static int decoder_thread(void *arg)
     }
 
 finish:
+    if (dp->dec_ctx && dp->dec_ctx->codec_type == AVMEDIA_TYPE_VIDEO) {
+        ff_free_ni_scte35_decoder(scte35_decoder);
+    }
+
     dec_thread_uninit(&dt);
 
     return ret;

@@ -117,9 +117,87 @@ typedef struct NetIntOverlayContext {
     ni_session_data_io_t crop_api_dst_frame;
 } NetIntOverlayContext;
 
+static int process_frame(FFFrameSync *fs);
+static int process_frame_inplace(FFFrameSync *fs);
+
+static int set_expr(AVExpr **pexpr, const char *expr, const char *option, void *log_ctx)
+{
+    int ret;
+    AVExpr *old = NULL;
+
+    if (*pexpr)
+        old = *pexpr;
+    ret = av_expr_parse(pexpr, expr, var_names,
+                        NULL, NULL, NULL, NULL, 0, log_ctx);
+    if (ret < 0) {
+        av_log(log_ctx, AV_LOG_ERROR,
+               "Error when evaluating the expression '%s' for %s\n",
+               expr, option);
+        *pexpr = old;
+        return ret;
+    }
+
+    av_expr_free(old);
+    return 0;
+}
+
+static int query_formats(AVFilterContext *ctx)
+{
+    /* We only accept hardware frames */
+    static const enum AVPixelFormat pix_fmts[] =
+        {AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE};
+    AVFilterFormats *formats;
+
+    formats = ff_make_format_list(pix_fmts);
+
+    if (!formats)
+        return AVERROR(ENOMEM);
+
+    return ff_set_common_formats(ctx, formats);
+}
+
+static int init_framesync(AVFilterContext *ctx)
+{
+    NetIntOverlayContext *s = ctx->priv;
+    int ret, i;
+
+    s->fs.on_event = s->inplace ? process_frame_inplace : process_frame;
+    s->fs.opaque   = s;
+    ret = ff_framesync_init(&s->fs, ctx, ctx->nb_inputs);
+    if (ret < 0)
+        return ret;
+
+    for (i = 0; i < ctx->nb_inputs; i++) {
+        FFFrameSyncIn *in = &s->fs.in[i];
+        in->before    = EXT_STOP;
+        in->after     = EXT_INFINITY;
+        in->sync      = i ? 1 : 2;
+        in->time_base = ctx->inputs[i]->time_base;
+    }
+
 #if !IS_FFMPEG_342_AND_ABOVE
-static int config_output(AVFilterLink *outlink, AVFrame *in);
+    if (!s->opt_repeatlast || s->opt_eof_action == EOF_ACTION_PASS) {
+        s->opt_repeatlast = 0;
+        s->opt_eof_action = EOF_ACTION_PASS;
+    }
+    if (s->opt_shortest || s->opt_eof_action == EOF_ACTION_ENDALL) {
+        s->opt_shortest = 1;
+        s->opt_eof_action = EOF_ACTION_ENDALL;
+    }
+    if (!s->opt_repeatlast) {
+        for (i = 1; i < s->fs.nb_in; i++) {
+            s->fs.in[i].after = EXT_NULL;
+            s->fs.in[i].sync  = 0;
+        }
+    }
+    if (s->opt_shortest) {
+        for (i = 0; i < s->fs.nb_in; i++)
+            s->fs.in[i].after = EXT_STOP;
+    }
 #endif
+
+    return ff_framesync_configure(&s->fs);
+}
 
 static av_cold void uninit(AVFilterContext *ctx)
 {
@@ -166,27 +244,6 @@ static void eval_expr(AVFilterContext *ctx)
     s->var_values[VAR_X] = av_expr_eval(s->x_pexpr, s->var_values, NULL);
     s->x = normalize_xy(s->var_values[VAR_X], s->hsub);
     s->y = normalize_xy(s->var_values[VAR_Y], s->vsub);
-}
-
-static int set_expr(AVExpr **pexpr, const char *expr, const char *option, void *log_ctx)
-{
-    int ret;
-    AVExpr *old = NULL;
-
-    if (*pexpr)
-        old = *pexpr;
-    ret = av_expr_parse(pexpr, expr, var_names,
-                        NULL, NULL, NULL, NULL, 0, log_ctx);
-    if (ret < 0) {
-        av_log(log_ctx, AV_LOG_ERROR,
-               "Error when evaluating the expression '%s' for %s\n",
-               expr, option);
-        *pexpr = old;
-        return ret;
-    }
-
-    av_expr_free(old);
-    return 0;
 }
 
 static int overlay_intersects_background(
@@ -277,21 +334,6 @@ static const enum AVPixelFormat alpha_pix_fmts[] = {
     AV_PIX_FMT_BGRA, AV_PIX_FMT_NONE
 };
 
-static int query_formats(AVFilterContext *ctx)
-{
-    /* We only accept hardware frames */
-    static const enum AVPixelFormat pix_fmts[] =
-        {AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE};
-    AVFilterFormats *formats;
-
-    formats = ff_make_format_list(pix_fmts);
-
-    if (!formats)
-        return AVERROR(ENOMEM);
-
-    return ff_set_common_formats(ctx, formats);
-}
-
 #if IS_FFMPEG_342_AND_ABOVE
 static int config_input_overlay(AVFilterLink *inlink)
 #else
@@ -331,7 +373,7 @@ static int config_input_overlay(AVFilterLink *inlink, AVFrame *in)
         return AVERROR(EINVAL);
     }
 
-    if(in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_10_TILE_4X4) {
+    if (in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_10_TILE_4X4) {
         av_log(ctx, AV_LOG_ERROR, "tile4x4 10b not supported for overlay!\n");
         return AVERROR(EINVAL);
     }
@@ -386,6 +428,110 @@ static int init_out_pool(AVFilterContext *ctx)
                                   out_frames_ctx->height, out_frames_ctx->sw_format,
                                   pool_size,
                                   s->buffer_limit);
+}
+
+
+#if IS_FFMPEG_342_AND_ABOVE
+static int config_output(AVFilterLink *outlink)
+#else
+static int config_output_dummy(AVFilterLink *outlink)
+{
+    AVFilterContext *ctx = outlink->src;
+    return init_framesync(ctx);
+}
+
+static int config_output(AVFilterLink *outlink, AVFrame *in)
+#endif
+{
+    AVFilterContext *ctx = outlink->src;
+    NetIntOverlayContext *s = ctx->priv;
+    AVHWFramesContext *in_frames_ctx;
+    AVHWFramesContext *out_frames_ctx;
+    int ret = 0;
+
+    outlink->w = ctx->inputs[MAIN]->w;
+    outlink->h = ctx->inputs[MAIN]->h;
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[MAIN]);
+    FilterLink *lo = ff_filter_link(outlink);
+    lo->frame_rate = li->frame_rate;
+#else
+    outlink->frame_rate = ctx->inputs[MAIN]->frame_rate;
+#endif
+    outlink->time_base = ctx->inputs[MAIN]->time_base;
+
+#if IS_FFMPEG_342_AND_ABOVE
+    ret = init_framesync(ctx);
+    if (ret < 0)
+        return ret;
+#if IS_FFMPEG_71_AND_ABOVE
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#else
+    in_frames_ctx = (AVHWFramesContext *)ctx->inputs[MAIN]->hw_frames_ctx->data;
+#endif
+#else
+    in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
+#endif
+    if (!s->inplace) {
+#if IS_FFMPEG_71_AND_ABOVE
+        FilterLink *lt;
+#endif
+        AVHWFramesContext *tmp_frames_ctx;
+
+        s->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
+        if (!s->out_frames_ref)
+            return AVERROR(ENOMEM);
+
+        out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
+
+        out_frames_ctx->format    = AV_PIX_FMT_NI_QUAD;
+        out_frames_ctx->width     = outlink->w;
+        out_frames_ctx->height    = outlink->h;
+
+        av_hwframe_ctx_init(s->out_frames_ref);
+
+#if IS_FFMPEG_71_AND_ABOVE
+        lt = ff_filter_link(ctx->inputs[OVERLAY]);
+        tmp_frames_ctx = (AVHWFramesContext *)lt->hw_frames_ctx->data;
+#else
+        tmp_frames_ctx = (AVHWFramesContext *)ctx->inputs[OVERLAY]->hw_frames_ctx->data;
+#endif
+        // HW does not support NV12 Compress + RGB -> NV12 Compress
+        if (((in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_8_TILE_4X4) ||
+            (in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_10_TILE_4X4)) &&
+            ((tmp_frames_ctx->sw_format >= AV_PIX_FMT_ARGB) &&
+            (tmp_frames_ctx->sw_format <= AV_PIX_FMT_BGRA))) {
+            out_frames_ctx->sw_format = AV_PIX_FMT_NV12;
+            av_log(ctx, AV_LOG_WARNING, "Overlay output is changed to nv12\n");
+        } else {
+            out_frames_ctx->sw_format = in_frames_ctx->sw_format;
+        }
+
+        out_frames_ctx->initial_pool_size =
+            NI_OVERLAY_ID; // Repurposed as identity code
+    } else {
+#if IS_FFMPEG_71_AND_ABOVE
+        s->out_frames_ref = av_buffer_ref(li->hw_frames_ctx);
+#else
+        s->out_frames_ref = av_buffer_ref(ctx->inputs[MAIN]->hw_frames_ctx);
+#endif
+    }
+
+#if IS_FFMPEG_71_AND_ABOVE
+    av_buffer_unref(&lo->hw_frames_ctx);
+
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
+    av_buffer_unref(&outlink->hw_frames_ctx);
+
+    outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!outlink->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#endif
+
+    return ret;
 }
 
 static int do_intermediate_crop_and_overlay(AVFilterContext *ctx,
@@ -585,9 +731,9 @@ static int process_frame(FFFrameSync *fs)
 
 #if IS_FFMPEG_61_AND_ABOVE
     av_log(ctx, AV_LOG_TRACE, "%s: ready %u inlink framequeue %u available_frame %d inlink_overlay framequeue %u available_frame %d outlink framequeue %u frame_wanted %d\n",
-        __func__, ctx->ready, 
-        ff_inlink_queued_frames(inlink_main), ff_inlink_check_available_frame(inlink_main), 
-        ff_inlink_queued_frames(inlink_overlay), ff_inlink_check_available_frame(inlink_overlay), 
+        __func__, ctx->ready,
+        ff_inlink_queued_frames(inlink_main), ff_inlink_check_available_frame(inlink_main),
+        ff_inlink_queued_frames(inlink_overlay), ff_inlink_check_available_frame(inlink_overlay),
         ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
 
     // Consume from inlink framequeue only when outlink framequeue is empty, to prevent filter from exhausting all pre-allocated device buffers
@@ -608,8 +754,7 @@ static int process_frame(FFFrameSync *fs)
     frame->pts =
         av_rescale_q(fs->pts, fs->time_base, ctx->outputs[0]->time_base);
 
-    if (overlay)
-    {
+    if (overlay) {
         s->var_values[VAR_OVERLAY_W] = s->var_values[VAR_OW] = overlay->width;
         s->var_values[VAR_OVERLAY_H] = s->var_values[VAR_OH] = overlay->height;
     }
@@ -634,8 +779,7 @@ static int process_frame(FFFrameSync *fs)
 
     main_cardno = ni_get_cardno(frame);
 
-    if (overlay)
-    {
+    if (overlay) {
         ovly_frame_ctx = (AVHWFramesContext *) overlay->hw_frames_ctx->data;
         ovly_scaler_format = ff_ni_ffmpeg_to_gc620_pix_fmt(ovly_frame_ctx->sw_format);
         ovly_cardno        = ni_get_cardno(overlay);
@@ -645,9 +789,7 @@ static int process_frame(FFFrameSync *fs)
                    "Main/Overlay frames on different cards\n");
             return AVERROR(EINVAL);
         }
-    }
-    else
-    {
+    } else {
         ovly_scaler_format = 0;
     }
 
@@ -701,8 +843,10 @@ static int process_frame(FFFrameSync *fs)
         ni_cpy_hwframe_ctx(main_frame_ctx, out_frames_ctx);
         ni_device_session_copy(&s->api_ctx, &out_ni_ctx->api_ctx);
 
-        if ((frame && frame->color_range == AVCOL_RANGE_JPEG) ||
-            (overlay && overlay->color_range == AVCOL_RANGE_JPEG)) {
+        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(main_frame_ctx->sw_format);
+
+        if (((frame && frame->color_range == AVCOL_RANGE_JPEG) ||
+            (overlay && overlay->color_range == AVCOL_RANGE_JPEG)) && !(desc->flags & AV_PIX_FMT_FLAG_RGB)) {
             av_log(ctx, AV_LOG_WARNING,
                    "WARNING: Full color range input, limited color range output\n");
         }
@@ -742,21 +886,20 @@ static int process_frame(FFFrameSync *fs)
      * incoming hardware frame index to the scaler manager.
      */
     retcode = ni_device_alloc_frame(
-        &s->api_ctx,                                             //
-        overlay ? FFALIGN(overlay->width, 2) : 0,                //
-        overlay ? FFALIGN(overlay->height, 2) : 0,               //
-        ovly_scaler_format,                                      //
-        (frame_surface && frame_surface->encoding_type == 2) ? NI_SCALER_FLAG_CMP : 0,                                                       //
-        overlay ? FFALIGN(overlay->width, 2) : 0,                //
-        overlay ? FFALIGN(overlay->height, 2) : 0,               //
-        s->x,                                                    //
-        s->y,                                                    //
-        frame_surface ? (int)frame_surface->ui32nodeAddress : 0, //
-        frame_surface ? frame_surface->ui16FrameIdx : 0,         //
+        &s->api_ctx,
+        overlay ? FFALIGN(overlay->width, 2) : 0,
+        overlay ? FFALIGN(overlay->height, 2) : 0,
+        ovly_scaler_format,
+        (frame_surface && frame_surface->encoding_type == 2) ? NI_SCALER_FLAG_CMP : 0,
+        overlay ? FFALIGN(overlay->width, 2) : 0,
+        overlay ? FFALIGN(overlay->height, 2) : 0,
+        s->x,
+        s->y,
+        frame_surface ? (int)frame_surface->ui32nodeAddress : 0,
+        frame_surface ? frame_surface->ui16FrameIdx : 0,
         NI_DEVICE_TYPE_SCALER);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_DEBUG, "Can't assign frame for overlay input %d\n",
                retcode);
         return AVERROR(ENOMEM);
@@ -774,21 +917,20 @@ static int process_frame(FFFrameSync *fs)
      */
     flags = (s->alpha_format ? NI_SCALER_FLAG_PA : 0) | NI_SCALER_FLAG_IO;
     flags |= (frame_surface && frame_surface->encoding_type == 2) ? NI_SCALER_FLAG_CMP : 0;
-    retcode = ni_device_alloc_frame(&s->api_ctx,                    //
-                                    FFALIGN(frame->width, 2),       //
-                                    FFALIGN(frame->height, 2),      //
-                                    main_scaler_format,             //
-                                    flags,                          //
-                                    FFALIGN(frame->width, 2),       //
-                                    FFALIGN(frame->height, 2),      //
+    retcode = ni_device_alloc_frame(&s->api_ctx,
+                                    FFALIGN(frame->width, 2),
+                                    FFALIGN(frame->height, 2),
+                                    main_scaler_format,
+                                    flags,
+                                    FFALIGN(frame->width, 2),
+                                    FFALIGN(frame->height, 2),
                                     0,                              // x
                                     0,                              // y
-                                    frame_surface->ui32nodeAddress, //
-                                    frame_surface->ui16FrameIdx,    //
+                                    frame_surface->ui32nodeAddress,
+                                    frame_surface->ui16FrameIdx,
                                     NI_DEVICE_TYPE_SCALER);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_DEBUG, "Can't allocate frame for output %d\n",
                retcode);
         return AVERROR(ENOMEM);
@@ -812,8 +954,7 @@ static int process_frame(FFFrameSync *fs)
     out->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
     out->data[3] = av_malloc(sizeof(niFrameSurface1_t));
 
-    if (!out->data[3])
-    {
+    if (!out->data[3]) {
         av_frame_free(&out);
         return AVERROR(ENOMEM);
     }
@@ -885,12 +1026,12 @@ static int process_frame_inplace(FFFrameSync *fs)
     int                   main_scaler_format, ovly_scaler_format;
     int                   src_x, src_y, src_w, src_h;
     int                   dst_x, dst_y, dst_w, dst_h;
-    
-#if IS_FFMPEG_61_AND_ABOVE 
+
+#if IS_FFMPEG_61_AND_ABOVE
     av_log(ctx, AV_LOG_TRACE, "%s: ready %u inlink framequeue %u available_frame %d inlink_overlay framequeue %u available_frame %d outlink framequeue %u frame_wanted %d\n",
-        __func__, ctx->ready, 
-        ff_inlink_queued_frames(inlink_main), ff_inlink_check_available_frame(inlink_main), 
-        ff_inlink_queued_frames(inlink_overlay), ff_inlink_check_available_frame(inlink_overlay), 
+        __func__, ctx->ready,
+        ff_inlink_queued_frames(inlink_main), ff_inlink_check_available_frame(inlink_main),
+        ff_inlink_queued_frames(inlink_overlay), ff_inlink_check_available_frame(inlink_overlay),
         ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
 
     // Consume from inlink framequeue only when outlink framequeue is empty, to prevent filter from exhausting all pre-allocated device buffers
@@ -1005,7 +1146,7 @@ static int process_frame_inplace(FFFrameSync *fs)
             retcode = ni_device_session_context_init(&s->crop_api_ctx);
             if (retcode < 0) {
                 av_log(ctx, AV_LOG_ERROR,
-                     "ni overlay filter (crop) session context init failure\n");
+                       "ni overlay filter (crop) session context init failure\n");
                 return retcode;
             }
 
@@ -1260,148 +1401,6 @@ static int process_frame_inplace(FFFrameSync *fs)
     return ff_filter_frame(ctx->outputs[0], out);
 }
 
-static int init_framesync(AVFilterContext *ctx)
-{
-    NetIntOverlayContext *s = ctx->priv;
-    int ret, i;
-
-    s->fs.on_event = s->inplace ? process_frame_inplace : process_frame;
-    s->fs.opaque   = s;
-    ret = ff_framesync_init(&s->fs, ctx, ctx->nb_inputs);
-    if (ret < 0)
-        return ret;
-
-    for (i = 0; i < ctx->nb_inputs; i++) {
-        FFFrameSyncIn *in = &s->fs.in[i];
-        in->before    = EXT_STOP;
-        in->after     = EXT_INFINITY;
-        in->sync      = i ? 1 : 2;
-        in->time_base = ctx->inputs[i]->time_base;
-    }
-
-#if !IS_FFMPEG_342_AND_ABOVE
-    if (!s->opt_repeatlast || s->opt_eof_action == EOF_ACTION_PASS) {
-        s->opt_repeatlast = 0;
-        s->opt_eof_action = EOF_ACTION_PASS;
-    }
-    if (s->opt_shortest || s->opt_eof_action == EOF_ACTION_ENDALL) {
-        s->opt_shortest = 1;
-        s->opt_eof_action = EOF_ACTION_ENDALL;
-    }
-    if (!s->opt_repeatlast) {
-        for (i = 1; i < s->fs.nb_in; i++) {
-            s->fs.in[i].after = EXT_NULL;
-            s->fs.in[i].sync  = 0;
-        }
-    }
-    if (s->opt_shortest) {
-        for (i = 0; i < s->fs.nb_in; i++)
-            s->fs.in[i].after = EXT_STOP;
-    }
-#endif
-
-    return ff_framesync_configure(&s->fs);
-}
-
-#if IS_FFMPEG_342_AND_ABOVE
-static int config_output(AVFilterLink *outlink)
-#else
-static int config_output_dummy(AVFilterLink *outlink)
-{
-    AVFilterContext *ctx = outlink->src;
-    return init_framesync(ctx);
-}
-
-static int config_output(AVFilterLink *outlink, AVFrame *in)
-#endif
-{
-    AVFilterContext *ctx = outlink->src;
-    NetIntOverlayContext *s = ctx->priv;
-    AVHWFramesContext *in_frames_ctx;
-    AVHWFramesContext *out_frames_ctx;
-    int ret = 0;
-
-    outlink->w = ctx->inputs[MAIN]->w;
-    outlink->h = ctx->inputs[MAIN]->h;
-#if IS_FFMPEG_71_AND_ABOVE
-    FilterLink *li = ff_filter_link(ctx->inputs[MAIN]);
-    FilterLink *lo = ff_filter_link(outlink);
-    lo->frame_rate = li->frame_rate;
-#else
-    outlink->frame_rate = ctx->inputs[MAIN]->frame_rate;
-#endif
-    outlink->time_base = ctx->inputs[MAIN]->time_base;
-
-#if IS_FFMPEG_342_AND_ABOVE
-    ret = init_framesync(ctx);
-    if (ret < 0)
-        return ret;
-#if IS_FFMPEG_71_AND_ABOVE
-    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
-#else
-    in_frames_ctx = (AVHWFramesContext *)ctx->inputs[MAIN]->hw_frames_ctx->data;
-#endif
-#else
-    in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
-#endif
-    if (!s->inplace) {
-        s->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
-        if (!s->out_frames_ref)
-            return AVERROR(ENOMEM);
-
-        out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
-
-        out_frames_ctx->format    = AV_PIX_FMT_NI_QUAD;
-        out_frames_ctx->width     = outlink->w;
-        out_frames_ctx->height    = outlink->h;
-        
-        av_hwframe_ctx_init(s->out_frames_ref);
-
-#if IS_FFMPEG_71_AND_ABOVE
-        FilterLink *lt = ff_filter_link(ctx->inputs[OVERLAY]);
-        AVHWFramesContext *tmp_frames_ctx = (AVHWFramesContext *)lt->hw_frames_ctx->data;
-#else
-        AVHWFramesContext *tmp_frames_ctx = (AVHWFramesContext *)ctx->inputs[OVERLAY]->hw_frames_ctx->data;
-#endif
-        // HW does not support NV12 Compress + RGB -> NV12 Compress
-        if(((in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_8_TILE_4X4) ||
-            (in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_10_TILE_4X4)) &&
-            ((tmp_frames_ctx->sw_format >= AV_PIX_FMT_ARGB) &&
-            (tmp_frames_ctx->sw_format <= AV_PIX_FMT_BGRA)))
-        {
-            out_frames_ctx->sw_format = AV_PIX_FMT_NV12;
-            av_log(ctx, AV_LOG_WARNING, "Overlay output is changed to nv12\n");
-        } else {
-            out_frames_ctx->sw_format = in_frames_ctx->sw_format;
-        }
-
-        out_frames_ctx->initial_pool_size =
-            NI_OVERLAY_ID; // Repurposed as identity code
-    } else {
-#if IS_FFMPEG_71_AND_ABOVE
-        s->out_frames_ref = av_buffer_ref(li->hw_frames_ctx);
-#else
-        s->out_frames_ref = av_buffer_ref(ctx->inputs[MAIN]->hw_frames_ctx);
-#endif
-    }
-
-#if IS_FFMPEG_71_AND_ABOVE
-    av_buffer_unref(&lo->hw_frames_ctx);
-
-    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-    if (!lo->hw_frames_ctx)
-        return AVERROR(ENOMEM);
-#else
-    av_buffer_unref(&outlink->hw_frames_ctx);
-
-    outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-    if (!outlink->hw_frames_ctx)
-        return AVERROR(ENOMEM);
-#endif
-
-    return ret;
-}
-
 /**
  * Blend image in src to destination buffer dst at position (x, y).
  */
@@ -1414,6 +1413,12 @@ static int config_input_main(AVFilterLink *inlink, AVFrame *in)
     NetIntOverlayContext *s = inlink->dst->priv;
     AVHWFramesContext *in_frames_ctx;
     const AVPixFmtDescriptor *pix_desc;
+
+    // Check for incompatible options
+    if (s->inplace && s->is_p2p) {
+        av_log(inlink->dst, AV_LOG_ERROR, "Cannot use 'inplace' and 'is_p2p' options together\n");
+        return AVERROR(EINVAL);
+    }
 
 #if IS_FFMPEG_71_AND_ABOVE
     FilterLink *li = ff_filter_link(inlink);
@@ -1441,7 +1446,7 @@ static int config_input_main(AVFilterLink *inlink, AVFrame *in)
         return AVERROR(EINVAL);
     }
 
-    if(in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_10_TILE_4X4) {
+    if (in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_10_TILE_4X4) {
         av_log(inlink->dst, AV_LOG_ERROR, "tile4x4 10b not supported for overlay!\n");
         return AVERROR(EINVAL);
     }
@@ -1456,13 +1461,7 @@ static int config_input_main(AVFilterLink *inlink, AVFrame *in)
     return 0;
 }
 
-#if IS_FFMPEG_342_AND_ABOVE
-static int activate(AVFilterContext *ctx)
-{
-    NetIntOverlayContext *s = ctx->priv;
-    return ff_framesync_activate(&s->fs);
-}
-#else
+#if !IS_FFMPEG_342_AND_ABOVE
 static int filter_frame(AVFilterLink *inlink, AVFrame *inpicref)
 {
     AVFilterContext *ctx = inlink->dst;
@@ -1488,60 +1487,38 @@ static int request_frame(AVFilterLink *outlink)
     NetIntOverlayContext *s = outlink->src->priv;
     return ff_framesync_request_frame(&s->fs, outlink);
 }
+#else
+static int activate(AVFilterContext *ctx)
+{
+    NetIntOverlayContext *s = ctx->priv;
+    return ff_framesync_activate(&s->fs);
+}
 #endif
 
 #define OFFSET(x) offsetof(NetIntOverlayContext, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_FILTERING_PARAM)
 
-static const AVOption overlay_options[] = {
-    { "x", "set the x expression", OFFSET(x_expr), AV_OPT_TYPE_STRING, {.str = "0"}, CHAR_MIN, CHAR_MAX, FLAGS },
-    { "y", "set the y expression", OFFSET(y_expr), AV_OPT_TYPE_STRING, {.str = "0"}, CHAR_MIN, CHAR_MAX, FLAGS },
-#if IS_FFMPEG_342_AND_ABOVE
-    { "repeat", "Repeat the previous frame.",   0, AV_OPT_TYPE_CONST, { .i64 = EOF_ACTION_REPEAT }, .flags = FLAGS, "eof_action" },
-    { "endall", "End both streams.",            0, AV_OPT_TYPE_CONST, { .i64 = EOF_ACTION_ENDALL }, .flags = FLAGS, "eof_action" },
-    { "pass",   "Pass through the main input.", 0, AV_OPT_TYPE_CONST, { .i64 = EOF_ACTION_PASS },   .flags = FLAGS, "eof_action" },
-#if (LIBAVFILTER_VERSION_MAJOR >= 6)
-    { "shortest", "force termination when the shortest input terminates", OFFSET(fs.opt_shortest), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, FLAGS },
-    { "repeatlast", "repeat overlay of the last overlay frame", OFFSET(fs.opt_repeatlast), AV_OPT_TYPE_BOOL, {.i64=1}, 0, 1, FLAGS },
-    { "eof_action", "Action to take when encountering EOF from secondary input ",
-        OFFSET(fs.opt_eof_action), AV_OPT_TYPE_INT, { .i64 = EOF_ACTION_REPEAT },
-        EOF_ACTION_REPEAT, EOF_ACTION_PASS, .flags = FLAGS, "eof_action" },
-#endif
-#else
-    FRAMESYNC_OPTIONS,
-#endif
-    { "alpha", "alpha format", OFFSET(alpha_format), AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGS, "alpha_format" },
-        { "straight",      "", 0, AV_OPT_TYPE_CONST, {.i64=0}, .flags = FLAGS, .unit = "alpha_format" },
-        { "premultiplied", "", 0, AV_OPT_TYPE_CONST, {.i64=1}, .flags = FLAGS, .unit = "alpha_format" },
-    { "inplace", "perform an in-place overlay", OFFSET(inplace), AV_OPT_TYPE_BOOL, { .i64=0}, 0, 1, FLAGS },
-    { "keep_alive_timeout",
-      "Specify a custom session keep alive timeout in seconds.",
-        OFFSET(keep_alive_timeout),
-        AV_OPT_TYPE_INT,
-          {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT},
-        NI_MIN_KEEP_ALIVE_TIMEOUT,
-        NI_MAX_KEEP_ALIVE_TIMEOUT,
-        FLAGS,
-        "keep_alive_timeout"},
-    {"is_p2p", "enable p2p transfer for non-inplace overlay", OFFSET(is_p2p), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, FLAGS},
-    {"buffer_limit",
-     "Whether to limit output buffering count, 0: no, 1: yes",
-     OFFSET(buffer_limit),
-     AV_OPT_TYPE_BOOL,
-     {.i64 = 0},
-     0,
-     1},
+static const AVOption ni_overlay_options[] = {
+    { "x",       "set the x expression", OFFSET(x_expr),       AV_OPT_TYPE_STRING, {.str = "0"}, CHAR_MIN, CHAR_MAX, FLAGS },
+    { "y",       "set the y expression", OFFSET(y_expr),       AV_OPT_TYPE_STRING, {.str = "0"}, CHAR_MIN, CHAR_MAX, FLAGS },
+    { "alpha",   "alpha format",         OFFSET(alpha_format), AV_OPT_TYPE_INT,    {.i64 = 0},   0,        1,        FLAGS, "alpha_format" },
+        { "straight",      "", 0, AV_OPT_TYPE_CONST, {.i64 = 0}, .flags = FLAGS, .unit = "alpha_format" },
+        { "premultiplied", "", 0, AV_OPT_TYPE_CONST, {.i64 = 1}, .flags = FLAGS, .unit = "alpha_format" },
+    { "inplace", "overlay in-place",     OFFSET(inplace),      AV_OPT_TYPE_BOOL,   {.i64 = 0},   0,        1,        FLAGS },
+    NI_FILT_OPTION_IS_P2P,
+    NI_FILT_OPTION_KEEPALIVE,
+    NI_FILT_OPTION_BUFFER_LIMIT,
     { NULL }
 };
 
 #if IS_FFMPEG_342_AND_ABOVE
 // NOLINTNEXTLINE(clang-diagnostic-deprecated-declarations)
-FRAMESYNC_DEFINE_CLASS(overlay, NetIntOverlayContext, fs);
+FRAMESYNC_DEFINE_CLASS(ni_overlay, NetIntOverlayContext, fs);
 #else
-AVFILTER_DEFINE_CLASS(overlay);
+AVFILTER_DEFINE_CLASS(ni_overlay);
 #endif
 
-static const AVFilterPad avfilter_vf_overlay_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
         .name         = "main",
         .type         = AVMEDIA_TYPE_VIDEO,
@@ -1565,7 +1542,7 @@ static const AVFilterPad avfilter_vf_overlay_inputs[] = {
 #endif
 };
 
-static const AVFilterPad avfilter_vf_overlay_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
@@ -1586,19 +1563,19 @@ AVFilter ff_vf_overlay_ni_quadra = {
     .description   = NULL_IF_CONFIG_SMALL("NETINT Quadra overlay a video source on top of the input v" NI_XCODER_REVISION),
     .uninit        = uninit,
     .priv_size     = sizeof(NetIntOverlayContext),
-    .priv_class    = &overlay_class,
+    .priv_class    = &ni_overlay_class,
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
-    FILTER_INPUTS(avfilter_vf_overlay_inputs),
-    FILTER_OUTPUTS(avfilter_vf_overlay_outputs),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
     FILTER_QUERY_FUNC(query_formats),
 #else
-    .inputs        = avfilter_vf_overlay_inputs,
-    .outputs       = avfilter_vf_overlay_outputs,
+    .inputs        = inputs,
+    .outputs       = outputs,
     .query_formats = query_formats,
 #endif
 // only FFmpeg 3.4.2 and above have .flags_internal
 #if IS_FFMPEG_342_AND_ABOVE
-    .preinit       = overlay_framesync_preinit,
+    .preinit       = ni_overlay_framesync_preinit,
     .activate      = activate,
     .flags_internal= FF_FILTER_FLAG_HWFRAME_AWARE
 #endif

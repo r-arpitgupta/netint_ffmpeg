@@ -96,7 +96,7 @@ typedef struct HwFormatContext {
     ni_session_data_io_t api_dst_frame;
 } HwFormatContext;
 
-typedef struct NiBgrContext {
+typedef struct NetIntBgrContext {
     const AVClass *class;
 
     AVBufferRef *hwdevice;
@@ -132,9 +132,23 @@ typedef struct NiBgrContext {
     int skip_random_offset;
     int keep_alive_timeout; /* keep alive timeout setting */
     int buffer_limit;
-} NiBgrContext;
+} NetIntBgrContext;
 
-static void cleanup_ai_context(AVFilterContext *ctx, NiBgrContext *s)
+static int query_formats(AVFilterContext *ctx)
+{
+    static const enum AVPixelFormat pix_fmts[] =
+        {AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE};
+    AVFilterFormats *formats;
+
+    formats = ff_make_format_list(pix_fmts);
+
+    if (!formats)
+        return AVERROR(ENOMEM);
+
+    return ff_set_common_formats(ctx, formats);
+}
+
+static void cleanup_ai_context(AVFilterContext *ctx, NetIntBgrContext *s)
 {
     ni_retcode_t retval;
     AiContext *ai_ctx = s->ai_ctx;
@@ -156,7 +170,7 @@ static void cleanup_ai_context(AVFilterContext *ctx, NiBgrContext *s)
     }
 }
 
-static int init_ai_context(AVFilterContext *ctx, NiBgrContext *s,
+static int init_ai_context(AVFilterContext *ctx, NetIntBgrContext *s,
                            AVFrame *frame)
 {
     ni_retcode_t retval;
@@ -327,7 +341,7 @@ out:
     return ret;
 }
 
-static av_cold int init_hwframe_scale(AVFilterContext *ctx, NiBgrContext *s,
+static av_cold int init_hwframe_scale(AVFilterContext *ctx, NetIntBgrContext *s,
                                       enum AVPixelFormat format, AVFrame *frame)
 {
     ni_retcode_t retval;
@@ -387,7 +401,20 @@ out:
     return ret;
 }
 
-static av_cold int init_hwframe_format(AVFilterContext *ctx, NiBgrContext *s,
+static void cleanup_hwframe_scale(AVFilterContext *ctx, NetIntBgrContext *s)
+{
+    HwScaleContext *hws_ctx = s->hws_ctx;
+
+    if (hws_ctx) {
+        ni_frame_buffer_free(&hws_ctx->api_dst_frame.data.frame);
+        ni_device_session_close(&hws_ctx->api_ctx, 1, NI_DEVICE_TYPE_SCALER);
+        ni_device_session_context_clear(&hws_ctx->api_ctx);
+        av_free(hws_ctx);
+        s->hws_ctx = NULL;
+    }
+}
+
+static av_cold int init_hwframe_format(AVFilterContext *ctx, NetIntBgrContext *s,
                                        AVFrame *frame)
 {
     ni_retcode_t retval;
@@ -451,20 +478,7 @@ out:
     return ret;
 }
 
-static void cleanup_hwframe_scale(AVFilterContext *ctx, NiBgrContext *s)
-{
-    HwScaleContext *hws_ctx = s->hws_ctx;
-
-    if (hws_ctx) {
-        ni_frame_buffer_free(&hws_ctx->api_dst_frame.data.frame);
-        ni_device_session_close(&hws_ctx->api_ctx, 1, NI_DEVICE_TYPE_SCALER);
-        ni_device_session_context_clear(&hws_ctx->api_ctx);
-        av_free(hws_ctx);
-        s->hws_ctx = NULL;
-    }
-}
-
-static void cleanup_hwframe_format(AVFilterContext *ctx, NiBgrContext *s)
+static void cleanup_hwframe_format(AVFilterContext *ctx, NetIntBgrContext *s)
 {
     HwFormatContext *fmt_ctx = s->format_ctx;
 
@@ -477,7 +491,7 @@ static void cleanup_hwframe_format(AVFilterContext *ctx, NiBgrContext *s)
     }
 }
 
-static int init_hwframe_uploader(AVFilterContext *ctx, NiBgrContext *s,
+static int init_hwframe_uploader(AVFilterContext *ctx, NetIntBgrContext *s,
                                  AVFrame *frame)
 {
     int ret;
@@ -527,9 +541,48 @@ static int init_hwframe_uploader(AVFilterContext *ctx, NiBgrContext *s,
     return 0;
 }
 
-static av_cold void nibgr_uninit(AVFilterContext *ctx)
+static int init_out_hwframe_ctx(AVFilterContext *ctx, AVHWFramesContext *in_frames_ctx)
 {
-    NiBgrContext *s            = ctx->priv;
+    NetIntBgrContext *s = ctx->priv;
+    AVFilterLink *inlink = ctx->inputs[0];
+    AVHWFramesContext *out_frames_ctx;
+    AVNIFramesContext *out_ni_ctx;
+
+    if (in_frames_ctx->sw_format == AV_PIX_FMT_BGRP) {
+        av_log(ctx, AV_LOG_ERROR, "bgrp not supported\n");
+        return AVERROR(EINVAL);
+    }
+
+    if (in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_8_TILE_4X4 ||
+        in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_10_TILE_4X4) {
+        av_log(ctx, AV_LOG_ERROR, "tile4x4 not supported\n");
+        return AVERROR(EINVAL);
+    }
+
+    s->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
+    if (!s->out_frames_ref)
+        return AVERROR(ENOMEM);
+
+    out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
+
+    out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+    ni_cpy_hwframe_ctx(in_frames_ctx, out_frames_ctx);
+    ni_device_session_copy(&s->ai_ctx->api_ctx, &out_ni_ctx->api_ctx);
+
+    out_frames_ctx->format            = AV_PIX_FMT_NI_QUAD;
+    out_frames_ctx->width             = inlink->w;
+    out_frames_ctx->height            = inlink->h;
+    out_frames_ctx->sw_format         = AV_PIX_FMT_RGBA;
+    out_frames_ctx->initial_pool_size = NI_BGR_ID;
+
+    av_hwframe_ctx_init(s->out_frames_ref);
+
+    return 0;
+}
+
+static av_cold void uninit(AVFilterContext *ctx)
+{
+    NetIntBgrContext *s            = ctx->priv;
     ni_roi_network_t *network = &s->network;
 
     av_buffer_unref(&s->hwframe);
@@ -554,213 +607,20 @@ static av_cold void nibgr_uninit(AVFilterContext *ctx)
     free(s->mask_data);
 }
 
-static int nibgr_query_formats(AVFilterContext *ctx)
-{
-    static const enum AVPixelFormat pix_fmts[] =
-        {AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE};
-    AVFilterFormats *formats;
-
-    formats = ff_make_format_list(pix_fmts);
-
-    if (!formats)
-        return AVERROR(ENOMEM);
-
-    return ff_set_common_formats(ctx, formats);
-}
-
-static int init_out_hwframe_ctx(AVFilterContext *ctx, AVHWFramesContext *in_frames_ctx)
-{
-    NiBgrContext *s = ctx->priv;
-    AVFilterLink *inlink = ctx->inputs[0];
-    AVHWFramesContext *out_frames_ctx;
-
-    if (in_frames_ctx->sw_format == AV_PIX_FMT_BGRP) {
-        av_log(ctx, AV_LOG_ERROR, "bgrp not supported\n");
-        return AVERROR(EINVAL);
-    }
-
-    if (in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_8_TILE_4X4 ||
-        in_frames_ctx->sw_format == AV_PIX_FMT_NI_QUAD_10_TILE_4X4) {
-        av_log(ctx, AV_LOG_ERROR, "tile4x4 not supported\n");
-        return AVERROR(EINVAL);
-    }
-
-    s->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
-    if (!s->out_frames_ref)
-        return AVERROR(ENOMEM);
-
-    out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
-
-    AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
-    ni_cpy_hwframe_ctx(in_frames_ctx, out_frames_ctx);
-    ni_device_session_copy(&s->ai_ctx->api_ctx, &out_ni_ctx->api_ctx);
-
-    out_frames_ctx->format            = AV_PIX_FMT_NI_QUAD;
-    out_frames_ctx->width             = inlink->w;
-    out_frames_ctx->height            = inlink->h;
-    out_frames_ctx->sw_format         = AV_PIX_FMT_RGBA;
-    out_frames_ctx->initial_pool_size = NI_BGR_ID;
-
-    av_hwframe_ctx_init(s->out_frames_ref);
-
-    return 0;
-}
-
-#if IS_FFMPEG_342_AND_ABOVE
-static int nibgr_config_output(AVFilterLink *outlink)
-#else
-static int nibgr_config_output(AVFilterLink *outlink, AVFrame *in)
-#endif
-{
-    AVFilterContext *ctx = outlink->src;
-    AVFilterLink *inlink = ctx->inputs[0];
-    NiBgrContext *s      = ctx->priv;
-    int linesize[4];
-
-    av_log(ctx, AV_LOG_DEBUG, "%s\n", __func__);
-
-    av_buffer_unref(&s->hwframe);
-#if IS_FFMPEG_71_AND_ABOVE
-    FilterLink *li = ff_filter_link(inlink);
-    if (li->hw_frames_ctx == NULL) {
-#elif IS_FFMPEG_342_AND_ABOVE
-    if (inlink->hw_frames_ctx == NULL) {
-#else
-    if (in->hw_frames_ctx == NULL) {
-#endif
-        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
-        return AVERROR(EINVAL);
-    }
-
-    av_log(ctx, AV_LOG_DEBUG, "inlink wxh %dx%d\n", inlink->w, inlink->h);
-
-    /* roi */
-    outlink->w = inlink->w;
-    outlink->h = inlink->h;
-
-    //prep download/upload buffer
-    linesize[0] = FFALIGN(inlink->w, 16) * 4;
-    linesize[1] = linesize[2] = linesize[3] = 0;
-    if (ni_frame_buffer_alloc_pixfmt(&s->p_dl_frame.data.frame,
-                                    NI_PIX_FMT_RGBA, inlink->w,
-                                    inlink->h, linesize, 2 /* alignment*/,
-                                     0 /*extra len*/))
-    {
-        return AVERROR(ENOMEM);
-    }
-    s->alpha_enlarge_frame = av_frame_alloc();
-
-    s->alpha_enlarge_frame->data[0] = s->p_dl_frame.data.frame.p_data[0];
-    s->alpha_enlarge_frame->linesize[0] = FFALIGN(inlink->w, 16) * 4;
-    s->alpha_enlarge_frame->width        = inlink->w;
-    s->alpha_enlarge_frame->height       = inlink->h;
-
-    av_log(ctx, AV_LOG_DEBUG, "outlink wxh %dx%d\n", outlink->w, outlink->h);
-
-#if IS_FFMPEG_71_AND_ABOVE
-    FilterLink *lo = ff_filter_link(outlink);
-    init_out_hwframe_ctx(ctx, (AVHWFramesContext *)li->hw_frames_ctx->data);
-    av_buffer_unref(&lo->hw_frames_ctx);
-    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-    if (!lo->hw_frames_ctx)
-        return AVERROR(ENOMEM);
-#else
-#if IS_FFMPEG_342_AND_ABOVE
-    init_out_hwframe_ctx(ctx, (AVHWFramesContext *)inlink->hw_frames_ctx->data);
-#endif
-
-    av_buffer_unref(&outlink->hw_frames_ctx);
-
-    outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-    if (!outlink->hw_frames_ctx)
-        return AVERROR(ENOMEM);
-#endif
-
-    return 0;
-}
-
-static int ni_get_mask2(AVFilterContext *ctx, ni_session_data_io_t *p_raw_mask_data)
-{
-    NiBgrContext *s = ctx->priv;
-    uint8_t Y_MIN = 255;
-    uint8_t Y_MAX = 0;
-    uint8_t *p_mask_raw_start     = p_raw_mask_data->data.packet.p_data;
-
-    int loop_length = 256 * 144;
-    uint8_t *p_mask_raw = p_mask_raw_start;
-    uint8_t ui8AiTensorL;
-    uint8_t ui8AiTensorR;
-    uint8_t *aui8SmallMask = s->aui8SmallMask;
-    for (int i = 0; i < loop_length;i++)
-    {
-        ui8AiTensorL = *(p_mask_raw + 1);
-        ui8AiTensorR = *p_mask_raw;
-
-        if (ui8AiTensorL < ui8AiTensorR) {
-            aui8SmallMask[i] = Y_MAX;
-        } else {
-            aui8SmallMask[i] = Y_MIN;
-        }
-        p_mask_raw+=2;
-    }
-    for (int i = 0; i < 30; i++)
-    {
-        av_log(ctx, AV_LOG_TRACE, "mask[%d] 0x%x\n",i, aui8SmallMask[i]);
-    }
-    return 0;
-}
-
-static int ni_upscale_alpha2RGBMTA(AVFilterContext *ctx)
-{
-    NiBgrContext *s = ctx->priv;
-    uint8_t *aui8SmallMask = s->aui8SmallMask;
-    uint8_t *p_rgbmta     = s->p_dl_frame.data.frame.p_data[0]; //rgbargbargba format
-    uint32_t destWidth     = s->alpha_enlarge_frame->width;
-    uint32_t destHeight    = s->alpha_enlarge_frame->height;
-
-    uint16_t src_x, src_y;
-    uint32_t dst_w_aligned = FFALIGN(destWidth, 16);
-#ifdef ALPHAONLY
-    for (uint32_t dst_y = 0; dst_y < destHeight; dst_y++) {
-        uint8_t *p8_dst = p_rgbmta + (dst_y * dst_w_aligned * sizeof(uint32_t)) + 3; //3rd byte
-        src_y = (uint16_t)floorf((((float)dst_y) / ((float)destHeight)) * ((float)144));
-        for (uint32_t dst_x = 0; dst_x < destWidth; dst_x++)
-        {
-            src_x = (uint16_t)floorf((((float)dst_x) / ((float)destWidth)) *
-            ((float) 256));
-
-            *p8_dst     = aui8SmallMask[src_y * 256 + src_x];
-            p8_dst += 4;
-        }
-    }
-#else
-    for (uint32_t dst_y = 0; dst_y < destHeight; dst_y++) {
-        uint32_t *p32_dst = (uint32_t *)(p_rgbmta + dst_y * dst_w_aligned * sizeof(uint32_t));
-        src_y = (uint16_t)floorf((((float)dst_y) / ((float)destHeight)) * ((float)144));
-        for (uint32_t dst_x = 0; dst_x < destWidth; dst_x++) {
-            src_x = (uint16_t)floorf((((float)dst_x) / ((float)destWidth)) * ((float)256));
-            //need to read write
-            if (aui8SmallMask[src_y * 256 + src_x]) {
-            //do nothing
-            } else {
-                *p32_dst = 0;
-            }
-            p32_dst += 1;
-        }
-    }
-#endif
-    return 0;
-}
-
 static int ni_bgr_config_input(AVFilterContext *ctx, AVFrame *frame)
 {
-    NiBgrContext *s = ctx->priv;
+    NetIntBgrContext *s = ctx->priv;
     int ret;
+    AVHWFramesContext *pAVHFWCtx;
+    const AVPixFmtDescriptor *desc;
 
     if (s->initialized)
         return 0;
 
-    if (frame->color_range == AVCOL_RANGE_JPEG) {
+    pAVHFWCtx = (AVHWFramesContext *) frame->hw_frames_ctx->data;
+    desc = av_pix_fmt_desc_get(pAVHFWCtx->sw_format);
+
+    if ((frame->color_range == AVCOL_RANGE_JPEG) && !(desc->flags & AV_PIX_FMT_FLAG_RGB)) {
         av_log(ctx, AV_LOG_WARNING,
                "WARNING: Full color range input, limited color range output\n");
     }
@@ -819,7 +679,149 @@ fail_out:
     return ret;
 }
 
-static int ni_hwframe_scale(AVFilterContext *ctx, NiBgrContext *s, AVFrame *in,
+#if IS_FFMPEG_342_AND_ABOVE
+static int config_output(AVFilterLink *outlink)
+#else
+static int config_output(AVFilterLink *outlink, AVFrame *in)
+#endif
+{
+    AVFilterContext *ctx = outlink->src;
+    AVFilterLink *inlink = ctx->inputs[0];
+    NetIntBgrContext *s      = ctx->priv;
+    int linesize[4];
+
+    av_log(ctx, AV_LOG_DEBUG, "%s\n", __func__);
+
+    av_buffer_unref(&s->hwframe);
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if (li->hw_frames_ctx == NULL) {
+#elif IS_FFMPEG_342_AND_ABOVE
+    if (inlink->hw_frames_ctx == NULL) {
+#else
+    if (in->hw_frames_ctx == NULL) {
+#endif
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+
+    av_log(ctx, AV_LOG_DEBUG, "inlink wxh %dx%d\n", inlink->w, inlink->h);
+
+    /* roi */
+    outlink->w = inlink->w;
+    outlink->h = inlink->h;
+
+    //prep download/upload buffer
+    linesize[0] = FFALIGN(inlink->w, 16) * 4;
+    linesize[1] = linesize[2] = linesize[3] = 0;
+    if (ni_frame_buffer_alloc_pixfmt(&s->p_dl_frame.data.frame,
+                                     NI_PIX_FMT_RGBA, inlink->w,
+                                     inlink->h, linesize, 2 /* alignment*/,
+                                     0 /*extra len*/)) {
+        return AVERROR(ENOMEM);
+    }
+    s->alpha_enlarge_frame = av_frame_alloc();
+
+    s->alpha_enlarge_frame->data[0] = s->p_dl_frame.data.frame.p_data[0];
+    s->alpha_enlarge_frame->linesize[0] = FFALIGN(inlink->w, 16) * 4;
+    s->alpha_enlarge_frame->width        = inlink->w;
+    s->alpha_enlarge_frame->height       = inlink->h;
+
+    av_log(ctx, AV_LOG_DEBUG, "outlink wxh %dx%d\n", outlink->w, outlink->h);
+
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(outlink);
+    init_out_hwframe_ctx(ctx, (AVHWFramesContext *)li->hw_frames_ctx->data);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
+#if IS_FFMPEG_342_AND_ABOVE
+    init_out_hwframe_ctx(ctx, (AVHWFramesContext *)inlink->hw_frames_ctx->data);
+#endif
+
+    av_buffer_unref(&outlink->hw_frames_ctx);
+
+    outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!outlink->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#endif
+
+    return 0;
+}
+
+static int ni_get_mask2(AVFilterContext *ctx, ni_session_data_io_t *p_raw_mask_data)
+{
+    NetIntBgrContext *s = ctx->priv;
+    uint8_t Y_MIN = 255;
+    uint8_t Y_MAX = 0;
+    uint8_t *p_mask_raw_start     = p_raw_mask_data->data.packet.p_data;
+
+    int loop_length = 256 * 144;
+    uint8_t *p_mask_raw = p_mask_raw_start;
+    uint8_t ui8AiTensorL;
+    uint8_t ui8AiTensorR;
+    uint8_t *aui8SmallMask = s->aui8SmallMask;
+    for (int i = 0; i < loop_length;i++) {
+        ui8AiTensorL = *(p_mask_raw + 1);
+        ui8AiTensorR = *p_mask_raw;
+
+        if (ui8AiTensorL < ui8AiTensorR) {
+            aui8SmallMask[i] = Y_MAX;
+        } else {
+            aui8SmallMask[i] = Y_MIN;
+        }
+        p_mask_raw+=2;
+    }
+    for (int i = 0; i < 30; i++) {
+        av_log(ctx, AV_LOG_TRACE, "mask[%d] 0x%x\n",i, aui8SmallMask[i]);
+    }
+    return 0;
+}
+
+static int ni_upscale_alpha2RGBMTA(AVFilterContext *ctx)
+{
+    NetIntBgrContext *s = ctx->priv;
+    uint8_t *aui8SmallMask = s->aui8SmallMask;
+    uint8_t *p_rgbmta     = s->p_dl_frame.data.frame.p_data[0]; //rgbargbargba format
+    uint32_t destWidth     = s->alpha_enlarge_frame->width;
+    uint32_t destHeight    = s->alpha_enlarge_frame->height;
+
+    uint16_t src_x, src_y;
+    uint32_t dst_w_aligned = FFALIGN(destWidth, 16);
+#ifdef ALPHAONLY
+    for (uint32_t dst_y = 0; dst_y < destHeight; dst_y++) {
+        uint8_t *p8_dst = p_rgbmta + (dst_y * dst_w_aligned * sizeof(uint32_t)) + 3; //3rd byte
+        src_y = (uint16_t)floorf((((float)dst_y) / ((float)destHeight)) * ((float)144));
+        for (uint32_t dst_x = 0; dst_x < destWidth; dst_x++) {
+            src_x = (uint16_t)floorf((((float)dst_x) / ((float)destWidth)) *
+            ((float) 256));
+
+            *p8_dst     = aui8SmallMask[src_y * 256 + src_x];
+            p8_dst += 4;
+        }
+    }
+#else
+    for (uint32_t dst_y = 0; dst_y < destHeight; dst_y++) {
+        uint32_t *p32_dst = (uint32_t *)(p_rgbmta + dst_y * dst_w_aligned * sizeof(uint32_t));
+        src_y = (uint16_t)floorf((((float)dst_y) / ((float)destHeight)) * ((float)144));
+        for (uint32_t dst_x = 0; dst_x < destWidth; dst_x++) {
+            src_x = (uint16_t)floorf((((float)dst_x) / ((float)destWidth)) * ((float)256));
+            //need to read write
+            if (aui8SmallMask[src_y * 256 + src_x]) {
+            //do nothing
+            } else {
+                *p32_dst = 0;
+            }
+            p32_dst += 1;
+        }
+    }
+#endif
+    return 0;
+}
+
+static int ni_hwframe_scale(AVFilterContext *ctx, NetIntBgrContext *s, AVFrame *in,
                             int w, int h,
                             niFrameSurface1_t ** downscale_bgr_surface)
 {
@@ -882,8 +884,9 @@ static int ni_hwframe_scale(AVFilterContext *ctx, NiBgrContext *s, AVFrame *in,
     return 0;
 }
 
-static int ni_bgr_process(AVFilterContext *ctx, ni_session_data_io_t *p_dst_pkt) {
-    NiBgrContext *s = ctx->priv;
+static int ni_bgr_process(AVFilterContext *ctx, ni_session_data_io_t *p_dst_pkt)
+{
+    NetIntBgrContext *s = ctx->priv;
     int ret;
 
     //aui8SmallMask
@@ -915,7 +918,7 @@ static int ni_bgr_process(AVFilterContext *ctx, ni_session_data_io_t *p_dst_pkt)
     return 0;
 }
 
-static int ni_hwframe_convert_format(AVFilterContext *ctx, NiBgrContext *s,
+static int ni_hwframe_convert_format(AVFilterContext *ctx, NetIntBgrContext *s,
                                      AVFrame *in,
                                      niFrameSurface1_t **rgba_frame_surface) {
     HwFormatContext *format_ctx = s->format_ctx;
@@ -992,8 +995,8 @@ static int ni_hwframe_convert_format(AVFilterContext *ctx, NiBgrContext *s,
     return retcode;
 }
 
-static int ni_hwframe_converted_download(AVFilterContext *ctx, NiBgrContext *s,
-                                     niFrameSurface1_t *hwdl_frame_surface)
+static int ni_hwframe_converted_download(AVFilterContext *ctx, NetIntBgrContext *s,
+                                         niFrameSurface1_t *hwdl_frame_surface)
 {
     HwFormatContext *format_ctx = s->format_ctx;
     int bytesRead;
@@ -1013,7 +1016,7 @@ static int ni_hwframe_converted_download(AVFilterContext *ctx, NiBgrContext *s,
 
 static int ni_bgr_create_output(AVFilterContext* ctx, AVFrame* in, AVFrame** realout)
 {
-    NiBgrContext *s = ctx->priv;
+    NetIntBgrContext *s = ctx->priv;
     AVFrame *out;
     int ret = 0;
 
@@ -1051,10 +1054,10 @@ static int ni_bgr_create_output(AVFilterContext* ctx, AVFrame* in, AVFrame** rea
 }
 
 
-static int nibgr_filter_frame(AVFilterLink *link, AVFrame *in)
+static int filter_frame(AVFilterLink *link, AVFrame *in)
 {
     AVFilterContext *ctx = link->dst;
-    NiBgrContext *s = ctx->priv;
+    NetIntBgrContext *s = ctx->priv;
     int ret;
     int clean_scale_format = 0;
 
@@ -1084,7 +1087,7 @@ static int nibgr_filter_frame(AVFilterLink *link, AVFrame *in)
         }
 
 #if !IS_FFMPEG_342_AND_ABOVE
-        ret = nibgr_config_output(ctx->outputs[0], in);
+        ret = config_output(ctx->outputs[0], in);
         if (ret) {
             av_log(ctx, AV_LOG_ERROR, "failed to config output\n");
             goto fail;
@@ -1102,14 +1105,13 @@ static int nibgr_filter_frame(AVFilterLink *link, AVFrame *in)
 #endif
 
     retval  = ni_ai_packet_buffer_alloc(&ai_ctx->api_dst_pkt.data.packet,
-                                       &network->raw);
+                                        &network->raw);
     if (retval != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "failed to allocate packet\n");
         return AVERROR(EAGAIN);
     }
 
-    if ((s->skip == 0) || ((s->framecount - 1) % (s->skip + 1) == 0))
-    {
+    if ((s->skip == 0) || ((s->framecount - 1) % (s->skip + 1) == 0)) {
         if (s->skip_random_offset) {
             s->framecount += ai_ctx->api_ctx.session_id % (s->skip + 1);
             av_log(ctx, AV_LOG_DEBUG, "BGR SPACE sid %u fc %u\n",
@@ -1117,8 +1119,7 @@ static int nibgr_filter_frame(AVFilterLink *link, AVFrame *in)
             s->skip_random_offset = 0;
         }
         s->skipInference = false;
-    } else
-    {
+    } else {
         s->skipInference = true;
         av_log(ctx, AV_LOG_DEBUG, "Inference skip, framecount %d\n", s->framecount);
     }
@@ -1229,7 +1230,7 @@ static int activate(AVFilterContext *ctx)
 {
     AVFilterLink  *inlink = ctx->inputs[0];
     AVFilterLink  *outlink = ctx->outputs[0];
-    NiBgrContext *s = ctx->priv;
+    NetIntBgrContext *s = ctx->priv;
     AVFrame *frame = NULL;
     AVHWFramesContext *hwfc;
     AVNIFramesContext *f_hwctx;
@@ -1238,22 +1239,17 @@ static int activate(AVFilterContext *ctx)
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
-    if (ff_inlink_check_available_frame(inlink))
-    {
-        if (s->initialized)
-        {
+    if (ff_inlink_check_available_frame(inlink)) {
+        if (s->initialized) {
             hwfc = (AVHWFramesContext *) s->hw_frames_ctx->data;
             f_hwctx = (AVNIFramesContext*) hwfc->hwctx;
 
             ret = ni_device_session_query_buffer_avail(&f_hwctx->api_ctx, NI_DEVICE_TYPE_UPLOAD);
         }
 
-        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
-        {
+        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION) {
             av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
-        }
-        else if (ret < 0)
-        {
+        } else if (ret < 0) {
             av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %lu available_frame %d outlink framequeue %lu frame_wanted %d - return NOT READY\n",
                 __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
             return FFERROR_NOT_READY;
@@ -1263,7 +1259,11 @@ static int activate(AVFilterContext *ctx)
         if (ret < 0)
             return ret;
 
-        return nibgr_filter_frame(inlink, frame);
+        ret = filter_frame(inlink, frame);
+        if (ret >= 0) {
+            ff_filter_set_ready(ctx, 300);
+        }
+        return ret;
     }
 
     // We did not get a frame from input link, check its status
@@ -1276,51 +1276,35 @@ static int activate(AVFilterContext *ctx)
 }
 #endif
 
-#define OFFSET(x) offsetof(NiBgrContext, x)
+#define OFFSET(x) offsetof(NetIntBgrContext, x)
 #define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
-static const AVOption nibgr_options[] = {
-    {"nb", "path to network binary file", OFFSET(nb_file), AV_OPT_TYPE_STRING,
-     .flags = FLAGS},
-    {"skip", "frames to skip between inference", OFFSET(skip), AV_OPT_TYPE_INT,
-     {.i64 = 0}, 0, INT_MAX, FLAGS},
-    {"keep_alive_timeout",
-     "Specify a custom session keep alive timeout in seconds.",
-     OFFSET(keep_alive_timeout),
-     AV_OPT_TYPE_INT,
-     {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT},
-     NI_MIN_KEEP_ALIVE_TIMEOUT,
-     NI_MAX_KEEP_ALIVE_TIMEOUT,
-     FLAGS,
-     "keep_alive_timeout"},
-     {"buffer_limit",
-      "Whether to limit output buffering count, 0: no, 1: yes",
-      OFFSET(buffer_limit),
-      AV_OPT_TYPE_BOOL,
-      {.i64 = 0},
-      0,
-      1},
-    {NULL},
+static const AVOption ni_bgr_options[] = {
+    { "nb",   "path to network binary file",      OFFSET(nb_file), AV_OPT_TYPE_STRING, .flags = FLAGS},
+    { "skip", "frames to skip between inference", OFFSET(skip),    AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
+    NI_FILT_OPTION_KEEPALIVE,
+    NI_FILT_OPTION_BUFFER_LIMIT,
+    { NULL },
 };
 
-AVFILTER_DEFINE_CLASS(nibgr);
+AVFILTER_DEFINE_CLASS(ni_bgr);
 
-static const AVFilterPad nibgr_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = nibgr_filter_frame,
+        .name         = "default",
+        .type         = AVMEDIA_TYPE_VIDEO,
+        .filter_frame = filter_frame,
     },
 #if (LIBAVFILTER_VERSION_MAJOR < 8)
     {NULL}
 #endif
 };
 
-static const AVFilterPad nibgr_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
 #if IS_FFMPEG_342_AND_ABOVE
-        .config_props = nibgr_config_output,
+        .config_props = config_output,
 #endif
     },
 #if (LIBAVFILTER_VERSION_MAJOR < 8)
@@ -1329,27 +1313,26 @@ static const AVFilterPad nibgr_outputs[] = {
 };
 
 AVFilter ff_vf_bgr_ni_quadra = {
-    .name        = "ni_quadra_bgr",
-    .description = NULL_IF_CONFIG_SMALL(
+    .name           = "ni_quadra_bgr",
+    .description    = NULL_IF_CONFIG_SMALL(
         "NETINT Quadra remove the background of the input video v" NI_XCODER_REVISION),
-
-    .uninit = nibgr_uninit,
+    .uninit         = uninit,
 #if IS_FFMPEG_61_AND_ABOVE
-    .activate      = activate,
+    .activate       = activate,
 #endif
-    .priv_size  = sizeof(NiBgrContext),
-    .priv_class = &nibgr_class,
+    .priv_size      = sizeof(NetIntBgrContext),
+    .priv_class     = &ni_bgr_class,
 // only FFmpeg 3.4.2 and above have .flags_internal
 #if IS_FFMPEG_342_AND_ABOVE
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 #endif
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
-    FILTER_INPUTS(nibgr_inputs),
-    FILTER_OUTPUTS(nibgr_outputs),
-    FILTER_QUERY_FUNC(nibgr_query_formats),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
+    FILTER_QUERY_FUNC(query_formats),
 #else
-    .inputs  = nibgr_inputs,
-    .outputs = nibgr_outputs,
-    .query_formats = nibgr_query_formats,
+    .inputs         = inputs,
+    .outputs        = outputs,
+    .query_formats  = query_formats,
 #endif
 };

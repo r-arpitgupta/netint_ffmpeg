@@ -1,4 +1,77 @@
 ================================================================================
+Release version: 5.3.0_RC2
+Date: 2025-06-07            SW version: 5.3.0_RC2           FW version: 5.3.0_RC2
+Compat FW API ver: 6sB      Libxcoder API ver: 2.76
+--------------------------------------------------------------------------------
+[FFMPEG/LIBAVCODEC] Add libklvanc and libklscte35 to FFmpeg-n4.3.1 for SCTE-104 support, pid remapping; reworked FFmpeg-n4.3.1 SCTE-35 decode support
+[FFMPEG] Fix incorrect rollover bits for mpeg and mpegts
+[FFMPEG] Make quadra entries in libavcodec/Makefile alphabetical
+[LIBAVCODEC/LIBAVFILTER] Deprecate and gate AVFrame->pkt_pos and pkt_size
+[LIBAVCODEC] When encountering invalid user params during gen_global_headers, use same error messages as main encoder session open
+[FFMPEG/LIBAVCODEC] Add '-udu_sei' param to netint h264/h265 encoders
+[FFMPEG/LIBAVFILTER] Set ready flags again in NI filters after each activation to consume multiple buffered frames in input queue
+[FFMPEG] Automatically enable gen_global_headers in video stream when output format is a segment
+[LIBAVCODEC] Add AV_PKT_DATA_QUALITY_STATS side data support for quadra encoder
+[LIBAVFILTER] Refactor is_p2p, keep_alive_timeout, auto_skip, and buffer_limit options to nifilter.h
+              Replace frame_sync options from vf_overlay_ni.c and vf_yuv420to444_ni.c with FRAMESYNC_DEFINE_CLASS
+              Remove empty comments
+              Standardize format of filter option tables
+              Move option definition from top to bottom for flip and rotate filters
+              Use AVFILTER_DEFINE_CLASS in all filters
+              Remove filter specific naming from static functions/definitions
+              Rename drawboxr_format to drawbox_format
+[LIBAVFILTER] Add yolov8 roi detect demo with ni_quadra_drawbox
+              Add process_command() callback to ni_quadra_drawbox filter
+              to allow dynamic changing of boxes. Removed init_dict()
+              callback from ni_quadra_drawbox which does nothing. Add
+              ni_yolov8_detect demo. Rename ni_roi_detect_move demos
+              to ni_roi_detect
+[LIBAVCODEC] Fix an issue where enableUserDataSeiPassthru decoder parameter was not taking effect properly
+[FFMPEG/LIBAVFILTER] Make vf_ni_quadra_split use activate() paradigm to remove an un-upstreamable workaround in ffmpeg_filter.c from
+[FFMPEG/LIBAVCODEC] Update code formatting for netint changes in libavutil
+[LIBAVFILTER] Update NI filters code quality changes for upstreaming FFmpeg
+[LIBAVCODEC] Add Encoder parameter checks:
+              1. horOffset, verOffset odd values rejected
+              2. AV1 tuneBframeVisual medium rejected
+              3. Jpeg encoder checks added
+              4. Encoder error message updated
+[LIBAVFILTER] Add ni_quadra_drawbox improvements
+              Remove rgba restriction of inputs frames because the firmware
+              can now support yuv420p and rgba frames. Add support for
+              in-place drawing of the drawboxes.
+[LIBAVFILTER] Fix an issue with ni_quadra_merge filter and filterblit=2
+[FFMPEG] FATE add supported codec type DATA
+[LIBAVFILTER] Added 720p resolution NB file support for hvsplus filter
+              Changing FW API version to 6sA
+[LIBAVFILTER] Add 2 improved bicubic algorithm filterblit=3 and filterblit=4 for scaler and merge filters.
+              Changing FW API version to 6s9
+[LIBAVFILTER] Fix ni_quadra_p2pxfer filter card number issue
+[FFMPEG/LIBAVCODEC/LIBAVFILTER] Code formatting and removal of dead code
+                                - Remove MULTI_THREAD from nienc.c
+                                - Remove commented out code in nienc.c, nidec.c, nicodec.c
+                                - Remove `#if (QUADRA) ... #else` as these codec files are always for QUADRA
+                                - Remove `#ifdef SEQUENCE_CHANGE_INJECT...` from nienc.c as it is unused
+                                - Remove code for handling partial packet write from nidec.c as it is unused
+                                - Convert tabs to space in all FFmpeg files
+                                - Trim trailing spaces in all FFmpeg files
+                                - Restore original file permissions for FFmpeg files
+                                - Refactor libavcodec decoder/encoder params for netint codecs
+                                - Make indents tabsize 4 and braces k&r in netint codecs and hwcontext
+                                - Rename XCoderH264DecContext to XCoderDecContext, and XCoderH265EncContext to XCodecEncContext
+                                - Fix mixed declarations and code in netint codecs and hwcontext
+                                - In vf_ai_pre_ni.c and vf_hvsplus_ni.c change size 2 and size 3 indents to size 4
+                                Remove code comment about 10bit input support for quadra jpeg encoder
+[FFMPEG] Added the support of up to 40 mpegts maximum audio bitrates in PMT
+[LIBAVFILTER] Remove 2D filter RGBA warning
+[LIBAVFILTER] Fix the padding issue for unsupported resolutions for 8 bit and 10 bit when using the ni_quadra_hvsplus
+[FFMPEG] Enable gen_global_headers for mp4 to fix quadra encode with movflags+empty_mov issue
+[FFMPEG/LIBAVFILTER] Add ni_quadra_scale2ref in ni_quadra_scale filter to support scale params main_*
+[FFMPEG] For FFmpeg-n6.1, fix repeated init of SCTE-35 decoder thread
+[FFMPEG/LIBAVCODEC] For FFmpeg-n7.1, add SCTE-35 support
+[FFMPEG] Add GenHdrs=1 if segment format is MKV/HLS/ASF/FLV
+[LIBAVCODEC] Added null pointer check during original handler restore
+[LIBAVFILTER] Make ai_pre_process filter's failure information more user-friendly
+================================================================================
 Release version: 5.2.0_RC3
 Date: 2025-03-13            SW version: 5.2.0_RC3           FW version: 5.2.0_RC1
 Compat FW API ver: 6s5      Libxcoder API ver: 2.76

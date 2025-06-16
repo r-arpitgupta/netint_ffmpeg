@@ -54,30 +54,18 @@ typedef struct NetIntFlipContext {
     int buffer_limit;
 } NetIntFlipContext;
 
-#define OFFSET(x) offsetof(NetIntFlipContext, x)
-#define FLAGS (AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM)
+static int query_formats(AVFilterContext *ctx)
+{
+    static const enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE };
+    AVFilterFormats *fmts_list = NULL;
 
-static const AVOption flip_options[] = {
-    { "flip_type",         "choose horizontal (0) or vertical (1) flip",    OFFSET(flip_type),  AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGS },
-    { "keep_alive_timeout",
-      "specify a custom session keep alive timeout in seconds",
-      OFFSET(keep_alive_timeout),
-      AV_OPT_TYPE_INT64,
-      { .i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT },
-      NI_MIN_KEEP_ALIVE_TIMEOUT,
-      NI_MAX_KEEP_ALIVE_TIMEOUT,
-      FLAGS },
-      { "buffer_limit",
-        "Whether to limit output buffering count, 0: no, 1: yes",
-        OFFSET(buffer_limit),
-        AV_OPT_TYPE_BOOL,
-        {.i64 = 0},
-        0,
-        1},
-    { NULL }
-};
+    fmts_list = ff_make_format_list(pix_fmts);
+    if (!fmts_list) {
+        return AVERROR(ENOMEM);
+    }
 
-AVFILTER_DEFINE_CLASS(flip);
+    return ff_set_common_formats(ctx, fmts_list);
+}
 
 static av_cold int init(AVFilterContext *ctx)
 {
@@ -90,13 +78,11 @@ static av_cold void uninit(AVFilterContext *ctx)
 {
     NetIntFlipContext *flip = ctx->priv;
 
-    if (flip->api_dst_frame.data.frame.p_buffer)
-    {
+    if (flip->api_dst_frame.data.frame.p_buffer) {
         ni_frame_buffer_free(&flip->api_dst_frame.data.frame);
     }
 
-    if (flip->session_opened)
-    {
+    if (flip->session_opened) {
         /* Close operation will free the device frames */
         ni_device_session_close(&flip->api_ctx, 1, NI_DEVICE_TYPE_SCALER);
         ni_device_session_context_clear(&flip->api_ctx);
@@ -104,20 +90,6 @@ static av_cold void uninit(AVFilterContext *ctx)
 
     av_buffer_unref(&flip->out_frames_ref);
 
-}
-
-static int query_formats(AVFilterContext *ctx)
-{
-    static const enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE };
-    AVFilterFormats *fmts_list = NULL;
-
-    fmts_list = ff_make_format_list(pix_fmts);
-    if (!fmts_list)
-    {
-        return AVERROR(ENOMEM);
-    }
-
-    return ff_set_common_formats(ctx, fmts_list);
 }
 
 #if IS_FFMPEG_342_AND_ABOVE
@@ -180,8 +152,7 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
 
 
     flip->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
-    if (!flip->out_frames_ref)
-    {
+    if (!flip->out_frames_ref) {
         return AVERROR(ENOMEM);
     }
 
@@ -200,16 +171,14 @@ static int config_props_delayed(AVFilterLink *outlink, AVFrame *in)
     av_buffer_unref(&lo->hw_frames_ctx);
     lo->hw_frames_ctx = av_buffer_ref(flip->out_frames_ref);
 
-    if (!lo->hw_frames_ctx)
-    {
+    if (!lo->hw_frames_ctx) {
         return AVERROR(ENOMEM);
     }
 #else
     av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
     ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(flip->out_frames_ref);
 
-    if (!ctx->outputs[0]->hw_frames_ctx)
-    {
+    if (!ctx->outputs[0]->hw_frames_ctx) {
         return AVERROR(ENOMEM);
     }
 #endif
@@ -258,14 +227,12 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     uint32_t scaler_format;
     int retcode = 0, card_number =  ni_get_cardno(in);
 
-    if (!frame_surface)
-    {
+    if (!frame_surface) {
         av_log(ctx, AV_LOG_ERROR, "ni flip filter frame_surface should not be NULL\n");
         return AVERROR(EINVAL);
     }
 
-    if (!flip->initialized)
-    {
+    if (!flip->initialized) {
 #if !IS_FFMPEG_342_AND_ABOVE
         retcode = config_props_delayed(outlink, in);
         if (retcode < 0) {
@@ -279,8 +246,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 #endif
 
         ni_retcode = ni_device_session_context_init(&flip->api_ctx);
-        if (ni_retcode != NI_RETCODE_SUCCESS)
-        {
+        if (ni_retcode != NI_RETCODE_SUCCESS) {
             av_log(ctx, AV_LOG_ERROR, "ni flip filter session context init failed with %d\n", ni_retcode);
             retcode = AVERROR(EINVAL);
             goto FAIL;
@@ -295,8 +261,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         flip->api_ctx.isP2P = flip->is_p2p;
 
         ni_retcode = ni_device_session_open(&flip->api_ctx, NI_DEVICE_TYPE_SCALER);
-        if (ni_retcode != NI_RETCODE_SUCCESS)
-        {
+        if (ni_retcode != NI_RETCODE_SUCCESS) {
             av_log(ctx, AV_LOG_ERROR, "ni flip filter device session open failed with %d\n", ni_retcode);
             retcode = ni_retcode;
             /* Close operation will free the device frames */
@@ -308,8 +273,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         flip->session_opened = true;
 
         ni_retcode = init_out_pool(inlink->dst);
-        if (ni_retcode != NI_RETCODE_SUCCESS)
-        {
+        if (ni_retcode != NI_RETCODE_SUCCESS) {
             av_log(ctx, AV_LOG_ERROR, "ni flip filter init out pool failed with %d\n", ni_retcode);
             goto FAIL;
         }
@@ -319,8 +283,10 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         ni_cpy_hwframe_ctx(in_frames_context, out_frames_ctx);
         ni_device_session_copy(&flip->api_ctx, &out_ni_ctx->api_ctx);
 
-        if (in->color_range == AVCOL_RANGE_JPEG)
-        {
+        AVHWFramesContext *pAVHFWCtx = (AVHWFramesContext *) in->hw_frames_ctx->data;
+        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pAVHFWCtx->sw_format);
+
+        if ((in->color_range == AVCOL_RANGE_JPEG) && !(desc->flags & AV_PIX_FMT_FLAG_RGB)) {
             av_log(ctx, AV_LOG_WARNING, "Full color range input, limited color output\n");
         }
 
@@ -331,8 +297,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                                              outlink->w,
                                              outlink->h,
                                              0);
-    if (ni_retcode != NI_RETCODE_SUCCESS)
-    {
+    if (ni_retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "ni flip filter frame buffer alloc hwenc failed with %d\n", ni_retcode);
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -351,12 +316,11 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     input_frame_config.rectangle_width = input_frame_config.picture_width = in->width;
     input_frame_config.rectangle_height = input_frame_config.picture_height = in->height;
 
-    if (flip->flip_type == 0) //hflip
-    {
+    if (flip->flip_type == 0) {
+        //hflip
         input_frame_config.orientation = 4;
-    }
-    else if (flip->flip_type == 1) //vflip
-    {
+    } else if (flip->flip_type == 1) {
+        //vflip
         input_frame_config.orientation = 5;
     }
 
@@ -367,8 +331,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     // use ni_device_config_frame() instead of ni_device_alloc_frame()
     // such that input_frame_config's orientation can be configured
     ni_retcode = ni_device_config_frame(&flip->api_ctx, &input_frame_config);
-    if (ni_retcode != NI_RETCODE_SUCCESS)
-    {
+    if (ni_retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "ni flip filter device config input frame failed with %d\n", ni_retcode);
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -387,16 +350,14 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                                        -1,
                                        NI_DEVICE_TYPE_SCALER);
 
-    if (ni_retcode != NI_RETCODE_SUCCESS)
-    {
+    if (ni_retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "ni flip filter device alloc output frame failed with %d\n", ni_retcode);
         retcode = AVERROR(ENOMEM);
         goto FAIL;
     }
 
     out = av_frame_alloc();
-    if (!out)
-    {
+    if (!out) {
         av_log(ctx, AV_LOG_ERROR, "ni flip filter av_frame_alloc returned NULL\n");
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -411,8 +372,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     out->hw_frames_ctx = av_buffer_ref(out_buffer_ref);
     out->data[3] = av_malloc(sizeof(niFrameSurface1_t));
-    if (!out->data[3])
-    {
+    if (!out->data[3]) {
         av_log(ctx, AV_LOG_ERROR, "ni flip filter av_alloc returned NULL\n");
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -422,8 +382,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     ni_retcode = ni_device_session_read_hwdesc(&flip->api_ctx,
                                                &flip->api_dst_frame,
                                                NI_DEVICE_TYPE_SCALER);
-    if (ni_retcode != NI_RETCODE_SUCCESS)
-    {
+    if (ni_retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "ni flip filter read hwdesc failed with %d\n", ni_retcode);
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -454,8 +413,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                                    ff_ni_frame_free,
                                    NULL,
                                    0);
-    if (!out->buf[0])
-    {
+    if (!out->buf[0]) {
         av_log(ctx, AV_LOG_ERROR, "ni flip filter av_buffer_create returned NULL\n");
         retcode = AVERROR(ENOMEM);
         goto FAIL;
@@ -483,19 +441,14 @@ static int activate(AVFilterContext *ctx)
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
-    if (ff_inlink_check_available_frame(inlink))
-    {
-        if (s->initialized)
-        {
+    if (ff_inlink_check_available_frame(inlink)) {
+        if (s->initialized) {
             ret = ni_device_session_query_buffer_avail(&s->api_ctx, NI_DEVICE_TYPE_SCALER);
         }
 
-        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
-        {
+        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION) {
             av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
-        }
-        else if (ret < 0)
-        {
+        } else if (ret < 0) {
             av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %u available_frame %d outlink framequeue %u frame_wanted %d - return NOT READY\n",
                 __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
             return FFERROR_NOT_READY;
@@ -505,7 +458,11 @@ static int activate(AVFilterContext *ctx)
         if (ret < 0)
             return ret;
 
-        return filter_frame(inlink, frame);
+        ret = filter_frame(inlink, frame);
+        if (ret >= 0) {
+            ff_filter_set_ready(ctx, 300);
+        }
+        return ret;
     }
 
     // We did not get a frame from input link, check its status
@@ -518,7 +475,23 @@ static int activate(AVFilterContext *ctx)
 }
 #endif
 
-static const AVFilterPad avfilter_vf_flip_inputs[] = {
+#define OFFSET(x) offsetof(NetIntFlipContext, x)
+#define FLAGS (AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM)
+
+static const AVOption ni_flip_options[] = {
+    { "flip_type",    "choose horizontal or vertical flip", OFFSET(flip_type), AV_OPT_TYPE_INT, {.i64 = 0},  0,  1, FLAGS, "flip_type" },
+        { "horizontal", NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 0}, 0, 0, FLAGS, "flip_type" },
+        { "h",          NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 0}, 0, 0, FLAGS, "flip_type" },
+        { "veritcal",   NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 1}, 0, 0, FLAGS, "flip_type" },
+        { "v",          NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 1}, 0, 0, FLAGS, "flip_type" },
+    NI_FILT_OPTION_KEEPALIVE,
+    NI_FILT_OPTION_BUFFER_LIMIT,
+    { NULL }
+};
+
+AVFILTER_DEFINE_CLASS(ni_flip);
+
+static const AVFilterPad inputs[] = {
     {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
@@ -529,7 +502,7 @@ static const AVFilterPad avfilter_vf_flip_inputs[] = {
 #endif
 };
 
-static const AVFilterPad avfilter_vf_flip_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
@@ -547,7 +520,7 @@ AVFilter ff_vf_flip_ni_quadra = {
     .description = NULL_IF_CONFIG_SMALL(
         "NETINT Quadra flip the input video v" NI_XCODER_REVISION),
     .priv_size  = sizeof(NetIntFlipContext),
-    .priv_class = &flip_class,
+    .priv_class = &ni_flip_class,
     .init       = init,
     .uninit     = uninit,
 #if IS_FFMPEG_61_AND_ABOVE
@@ -555,12 +528,12 @@ AVFilter ff_vf_flip_ni_quadra = {
 #endif
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
     FILTER_QUERY_FUNC(query_formats),
-    FILTER_INPUTS(avfilter_vf_flip_inputs),
-    FILTER_OUTPUTS(avfilter_vf_flip_outputs),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
 #else
     .query_formats = query_formats,
-    .inputs        = avfilter_vf_flip_inputs,
-    .outputs       = avfilter_vf_flip_outputs,
+    .inputs        = inputs,
+    .outputs       = outputs,
 #endif
 // only FFmpeg 3.4.2 and above have .flags_internal
 #if IS_FFMPEG_342_AND_ABOVE

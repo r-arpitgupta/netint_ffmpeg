@@ -155,8 +155,9 @@ static inline int normalize_double(int *n, double d)
     } else if (d > INT_MAX || d < INT_MIN) {
         *n = d > INT_MAX ? INT_MAX : INT_MIN;
         ret = AVERROR(EINVAL);
-    } else
+    } else {
         *n = (int)lrint(d);
+    }
 
     return ret;
 }
@@ -168,6 +169,9 @@ static int config_input(AVFilterLink *link, AVFrame *in)
 #endif
 {
     AVFilterContext *ctx = link->dst;
+    NetIntDelogoContext *s = ctx->priv;
+    int ret;
+
 #if IS_FFMPEG_71_AND_ABOVE
     FilterLink *li = ff_filter_link(link);
     if (li->hw_frames_ctx == NULL) {
@@ -177,8 +181,6 @@ static int config_input(AVFilterLink *link, AVFrame *in)
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
     }
-    NetIntDelogoContext *s = ctx->priv;
-    int ret;
 
     if ((ret = set_expr(&s->x_pexpr, s->x_expr, "x", ctx)) < 0 ||
         (ret = set_expr(&s->y_pexpr, s->y_expr, "y", ctx)) < 0 ||
@@ -251,10 +253,22 @@ static int config_output(AVFilterLink *link, AVFrame *in)
     ctx           = (AVFilterContext *)link->src;
 #if IS_FFMPEG_71_AND_ABOVE
     FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
     in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
 #elif IS_FFMPEG_342_AND_ABOVE
+    if (ctx->inputs[0]->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
     in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
 #else
+    if (in->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
     in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
 #endif
     link->w = in_frames_ctx->width;
@@ -320,7 +334,7 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
 
     pAVHFWCtx = (AVHWFramesContext *)frame->hw_frames_ctx->data;
     if (!pAVHFWCtx) {
-	return AVERROR(EINVAL);
+        return AVERROR(EINVAL);
     }
 
     pAVNIDevCtx = (AVNIDeviceContext *)pAVHFWCtx->device_ctx->hwctx;
@@ -374,8 +388,7 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
         s->session_opened = 1;
 
         retcode = init_out_pool(ctx);
-        if (retcode < 0)
-        {
+        if (retcode < 0) {
             av_log(ctx, AV_LOG_ERROR,
                    "Internal output allocation failed rc = %d\n", retcode);
             goto fail;
@@ -386,8 +399,10 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
         ni_cpy_hwframe_ctx(pAVHFWCtx, out_frames_ctx);
         ni_device_session_copy(&s->api_ctx, &out_ni_ctx->api_ctx);
 
-        if (frame->color_range == AVCOL_RANGE_JPEG) {
-            av_log(ctx, AV_LOG_WARNING,
+        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pAVHFWCtx->sw_format);
+
+        if ((frame->color_range == AVCOL_RANGE_JPEG) && !(desc->flags & AV_PIX_FMT_FLAG_RGB)) {
+            av_log(link->dst, AV_LOG_WARNING,
                    "WARNING: Full color range input, limited color range output\n");
         }
 
@@ -403,13 +418,11 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
     s->var_values[VAR_N] = link->frame_count;
 #endif
 
-    if ((unsigned)s->x + (unsigned)s->w > link->w)
-    {
+    if ((unsigned)s->x + (unsigned)s->w > link->w) {
         s->x = link->w - s->w;
         s->x = FFALIGN(s->x,2);
     }
-    if ((unsigned)s->y + (unsigned)s->h > link->h)
-    {
+    if ((unsigned)s->y + (unsigned)s->h > link->h) {
         s->y = link->h - s->h;
         s->y = FFALIGN(s->y,2);
     }
@@ -431,8 +444,7 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
                                           outlink->h,
                                           0);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         retcode = AVERROR(ENOMEM);
         goto fail;
     }
@@ -445,10 +457,10 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
      * Allocate device input frame. This call won't actually allocate a frame,
      * but sends the incoming hardware frame index to the scaler manager
      */
-    retcode = ni_device_alloc_frame(&s->api_ctx,               //
-                                    FFALIGN(frame->width, 2),  //
-                                    FFALIGN(frame->height, 2), //
-                                    scaler_format,             //
+    retcode = ni_device_alloc_frame(&s->api_ctx,
+                                    FFALIGN(frame->width, 2),
+                                    FFALIGN(frame->height, 2),
+                                    scaler_format,
                                     0,                         // input frame
                                     s->w, // src rectangle width
                                     s->h, // src rectangle height
@@ -458,8 +470,7 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
                                     frame_surface->ui16FrameIdx,
                                     NI_DEVICE_TYPE_SCALER);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_DEBUG, "Can't assign input frame %d\n",
                retcode);
         retcode = AVERROR(ENOMEM);
@@ -480,8 +491,7 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
                         -1,
                         NI_DEVICE_TYPE_SCALER);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_DEBUG, "Can't allocate device output frame %d\n",
                retcode);
 
@@ -490,8 +500,7 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
     }
 
     out = av_frame_alloc();
-    if (!out)
-    {
+    if (!out) {
         retcode = AVERROR(ENOMEM);
         goto fail;
     }
@@ -511,8 +520,7 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
 
     out->data[3] = av_malloc(sizeof(niFrameSurface1_t));
 
-    if (!out->data[3])
-    {
+    if (!out->data[3]) {
         retcode = AVERROR(ENOMEM);
         goto fail;
     }
@@ -584,19 +592,14 @@ static int activate(AVFilterContext *ctx)
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
-    if (ff_inlink_check_available_frame(inlink))
-    {
-        if (s->initialized)
-        {
+    if (ff_inlink_check_available_frame(inlink)) {
+        if (s->initialized) {
             ret = ni_device_session_query_buffer_avail(&s->api_ctx, NI_DEVICE_TYPE_SCALER);
         }
 
-        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
-        {
+        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION) {
             av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
-        }
-        else if (ret < 0)
-        {
+        } else if (ret < 0) {
             av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %u available_frame %d outlink framequeue %u frame_wanted %d - return NOT READY\n",
                 __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
             return FFERROR_NOT_READY;
@@ -606,7 +609,11 @@ static int activate(AVFilterContext *ctx)
         if (ret < 0)
             return ret;
 
-        return filter_frame(inlink, frame);
+        ret = filter_frame(inlink, frame);
+        if (ret >= 0) {
+            ff_filter_set_ready(ctx, 300);
+        }
+        return ret;
     }
 
     // We did not get a frame from input link, check its status
@@ -622,33 +629,19 @@ static int activate(AVFilterContext *ctx)
 #define OFFSET(x) offsetof(NetIntDelogoContext, x)
 #define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 
-static const AVOption delogo_options[] = {
-    { "x",           "set the x delogo area expression",       OFFSET(x_expr), AV_OPT_TYPE_STRING, {.str = "0"}, CHAR_MIN, CHAR_MAX, FLAGS },
-    { "y",           "set the y delogo area expression",       OFFSET(y_expr), AV_OPT_TYPE_STRING, {.str = "0"}, CHAR_MIN, CHAR_MAX, FLAGS },
-    { "w",           "set the width delogo area expression",   OFFSET(w_expr), AV_OPT_TYPE_STRING, {.str = "iw"}, CHAR_MIN, CHAR_MAX, FLAGS },
-    { "h",           "set the height delogo area expression",  OFFSET(h_expr), AV_OPT_TYPE_STRING, {.str = "ih"}, CHAR_MIN, CHAR_MAX, FLAGS },
-    {"keep_alive_timeout",
-     "Specify a custom session keep alive timeout in seconds.",
-     OFFSET(keep_alive_timeout),
-     AV_OPT_TYPE_INT,
-     {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT},
-     NI_MIN_KEEP_ALIVE_TIMEOUT,
-     NI_MAX_KEEP_ALIVE_TIMEOUT,
-     FLAGS,
-     "keep_alive_timeout"},
-     {"buffer_limit",
-      "Whether to limit output buffering count, 0: no, 1: yes",
-      OFFSET(buffer_limit),
-      AV_OPT_TYPE_BOOL,
-      {.i64 = 0},
-      0,
-      1},
+static const AVOption ni_delogo_options[] = {
+    { "x", "set the x delogo area expression",      OFFSET(x_expr), AV_OPT_TYPE_STRING, {.str = "0"},  CHAR_MIN, CHAR_MAX, FLAGS },
+    { "y", "set the y delogo area expression",      OFFSET(y_expr), AV_OPT_TYPE_STRING, {.str = "0"},  CHAR_MIN, CHAR_MAX, FLAGS },
+    { "w", "set the width delogo area expression",  OFFSET(w_expr), AV_OPT_TYPE_STRING, {.str = "iw"}, CHAR_MIN, CHAR_MAX, FLAGS },
+    { "h", "set the height delogo area expression", OFFSET(h_expr), AV_OPT_TYPE_STRING, {.str = "ih"}, CHAR_MIN, CHAR_MAX, FLAGS },
+    NI_FILT_OPTION_KEEPALIVE,
+    NI_FILT_OPTION_BUFFER_LIMIT,
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(delogo);
+AVFILTER_DEFINE_CLASS(ni_delogo);
 
-static const AVFilterPad avfilter_vf_delogo_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
@@ -662,7 +655,7 @@ static const AVFilterPad avfilter_vf_delogo_inputs[] = {
 #endif
 };
 
-static const AVFilterPad avfilter_vf_delogo_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
@@ -679,7 +672,7 @@ AVFilter ff_vf_delogo_ni_quadra = {
     .name            = "ni_quadra_delogo",
     .description     = NULL_IF_CONFIG_SMALL("NETINT Quadra delogo the input video v" NI_XCODER_REVISION),
     .priv_size       = sizeof(NetIntDelogoContext),
-    .priv_class      = &delogo_class,
+    .priv_class      = &ni_delogo_class,
     .uninit          = uninit,
 #if IS_FFMPEG_61_AND_ABOVE
     .activate      = activate,
@@ -688,12 +681,12 @@ AVFilter ff_vf_delogo_ni_quadra = {
     .flags_internal  = FF_FILTER_FLAG_HWFRAME_AWARE,
 #endif
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
-    FILTER_INPUTS(avfilter_vf_delogo_inputs),
-    FILTER_OUTPUTS(avfilter_vf_delogo_outputs),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
     FILTER_QUERY_FUNC(query_formats),
 #else
-    .inputs          = avfilter_vf_delogo_inputs,
-    .outputs         = avfilter_vf_delogo_outputs,
+    .inputs          = inputs,
+    .outputs         = outputs,
     .query_formats   = query_formats,
 #endif
 };

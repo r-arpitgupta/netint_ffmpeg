@@ -258,6 +258,10 @@ static int hevc_frame_init_tiles(HEVCFSplitContext *s, AVBSFContext *ctx) {
         CodedBitstreamUnit *unit = &s->temporal_unit.units[i];
         if (unit->type == HEVC_NAL_PPS) {
             pps = (H265RawPPS *)unit->content;
+            if (!pps) {
+                av_log(ctx, AV_LOG_ERROR, "invalid pps\n");
+                return AVERROR(EINVAL);
+            }
             break;
         }
     }

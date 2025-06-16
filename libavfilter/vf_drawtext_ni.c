@@ -78,7 +78,6 @@
 #include FT_STROKER_H
 
 #define MAX_TEXT_NUM 32
-#define USE_WATERMARK_RADIO 4
 
 static const char *const var_names[] = {
     "dar",
@@ -98,9 +97,11 @@ static const char *const var_names[] = {
     "x",
     "y",
     "pict_type",
+#if FF_API_FRAME_PKT
     "pkt_pos",
-    "pkt_duration",
     "pkt_size",
+#endif
+    "pkt_duration",
     NULL
 };
 
@@ -138,9 +139,11 @@ enum var_name {
     VAR_X,
     VAR_Y,
     VAR_PICT_TYPE,
+#if FF_API_FRAME_PKT
     VAR_PKT_POS,
-    VAR_PKT_DURATION,
     VAR_PKT_SIZE,
+#endif
+    VAR_PKT_DURATION,
     VAR_VARS_NB
 };
 
@@ -150,7 +153,7 @@ enum expansion_mode {
     EXP_STRFTIME,
 };
 
-typedef struct NIDrawTextContext {
+typedef struct NetIntDrawTextContext {
     const AVClass *class;
     int exp_mode;                   ///< expansion mode to use for the text
     int reinit;                     ///< tells if the filter is being reinited
@@ -276,377 +279,375 @@ typedef struct NIDrawTextContext {
     int framerate;
     int initiated_upload_width;
     int initiated_upload_height;
-} NIDrawTextContext;
+} NetIntDrawTextContext;
 
 static const enum AVPixelFormat alpha_pix_fmts[] = {
     AV_PIX_FMT_RGBA, AV_PIX_FMT_ARGB, AV_PIX_FMT_ABGR,
     AV_PIX_FMT_BGRA, AV_PIX_FMT_NONE
 };
 
-#define OFFSET(x) offsetof(NIDrawTextContext, x)
+#define OFFSET(x) offsetof(NetIntDrawTextContext, x)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 
-static const AVOption nidrawtext_options[]= {
-    {"fontfile",    "set font file",        OFFSET(fontfile[0]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff0",         "set font file",        OFFSET(fontfile[0]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff1",         "set font file",        OFFSET(fontfile[1]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff2",         "set font file",        OFFSET(fontfile[2]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff3",         "set font file",        OFFSET(fontfile[3]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff4",         "set font file",        OFFSET(fontfile[4]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff5",         "set font file",        OFFSET(fontfile[5]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff6",         "set font file",        OFFSET(fontfile[6]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff7",         "set font file",        OFFSET(fontfile[7]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff8",         "set font file",        OFFSET(fontfile[8]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff9",         "set font file",        OFFSET(fontfile[9]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff10",        "set font file",        OFFSET(fontfile[10]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff11",        "set font file",        OFFSET(fontfile[11]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff12",        "set font file",        OFFSET(fontfile[12]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff13",        "set font file",        OFFSET(fontfile[13]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff14",        "set font file",        OFFSET(fontfile[14]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff15",        "set font file",        OFFSET(fontfile[15]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff16",        "set font file",        OFFSET(fontfile[16]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff17",        "set font file",        OFFSET(fontfile[17]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff18",        "set font file",        OFFSET(fontfile[18]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff19",        "set font file",        OFFSET(fontfile[19]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff20",        "set font file",        OFFSET(fontfile[20]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff21",        "set font file",        OFFSET(fontfile[21]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff22",        "set font file",        OFFSET(fontfile[22]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff23",        "set font file",        OFFSET(fontfile[23]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff24",        "set font file",        OFFSET(fontfile[24]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff25",        "set font file",        OFFSET(fontfile[25]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff26",        "set font file",        OFFSET(fontfile[26]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff27",        "set font file",        OFFSET(fontfile[27]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff28",        "set font file",        OFFSET(fontfile[28]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff29",        "set font file",        OFFSET(fontfile[29]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff30",        "set font file",        OFFSET(fontfile[30]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"ff31",        "set font file",        OFFSET(fontfile[31]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"text",        "set text",             OFFSET(text[0]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t0",          "set text",             OFFSET(text[0]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t1",          "set text",             OFFSET(text[1]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t2",          "set text",             OFFSET(text[2]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t3",          "set text",             OFFSET(text[3]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t4",          "set text",             OFFSET(text[4]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t5",          "set text",             OFFSET(text[5]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t6",          "set text",             OFFSET(text[6]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t7",          "set text",             OFFSET(text[7]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t8",          "set text",             OFFSET(text[8]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t9",          "set text",             OFFSET(text[9]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t10",         "set text",             OFFSET(text[10]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t11",         "set text",             OFFSET(text[11]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t12",         "set text",             OFFSET(text[12]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t13",         "set text",             OFFSET(text[13]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t14",         "set text",             OFFSET(text[14]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t15",         "set text",             OFFSET(text[15]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t16",         "set text",             OFFSET(text[16]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t17",         "set text",             OFFSET(text[17]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t18",         "set text",             OFFSET(text[18]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t19",         "set text",             OFFSET(text[19]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t20",         "set text",             OFFSET(text[20]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t21",         "set text",             OFFSET(text[21]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t22",         "set text",             OFFSET(text[22]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t23",         "set text",             OFFSET(text[23]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t24",         "set text",             OFFSET(text[24]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t25",         "set text",             OFFSET(text[25]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t26",         "set text",             OFFSET(text[26]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t27",         "set text",             OFFSET(text[27]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t28",         "set text",             OFFSET(text[28]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t29",         "set text",             OFFSET(text[29]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t30",         "set text",             OFFSET(text[30]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"t31",         "set text",             OFFSET(text[31]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"textfile",    "set text file",        OFFSET(textfile),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-    {"fontcolor",   "set foreground color", OFFSET(fontcolor[0].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc0",         "set foreground color", OFFSET(fontcolor[0].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc1",         "set foreground color", OFFSET(fontcolor[1].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc2",         "set foreground color", OFFSET(fontcolor[2].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc3",         "set foreground color", OFFSET(fontcolor[3].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc4",         "set foreground color", OFFSET(fontcolor[4].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc5",         "set foreground color", OFFSET(fontcolor[5].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc6",         "set foreground color", OFFSET(fontcolor[6].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc7",         "set foreground color", OFFSET(fontcolor[7].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc8",         "set foreground color", OFFSET(fontcolor[8].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc9",         "set foreground color", OFFSET(fontcolor[9].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc10",        "set foreground color", OFFSET(fontcolor[10].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc11",        "set foreground color", OFFSET(fontcolor[11].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc12",        "set foreground color", OFFSET(fontcolor[12].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc13",        "set foreground color", OFFSET(fontcolor[13].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc14",        "set foreground color", OFFSET(fontcolor[14].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc15",        "set foreground color", OFFSET(fontcolor[15].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc16",        "set foreground color", OFFSET(fontcolor[16].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc17",        "set foreground color", OFFSET(fontcolor[17].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc18",        "set foreground color", OFFSET(fontcolor[18].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc19",        "set foreground color", OFFSET(fontcolor[19].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc20",        "set foreground color", OFFSET(fontcolor[20].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc21",        "set foreground color", OFFSET(fontcolor[21].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc22",        "set foreground color", OFFSET(fontcolor[22].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc23",        "set foreground color", OFFSET(fontcolor[23].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc24",        "set foreground color", OFFSET(fontcolor[24].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc25",        "set foreground color", OFFSET(fontcolor[25].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc26",        "set foreground color", OFFSET(fontcolor[26].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc27",        "set foreground color", OFFSET(fontcolor[27].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc28",        "set foreground color", OFFSET(fontcolor[28].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc29",        "set foreground color", OFFSET(fontcolor[29].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc30",        "set foreground color", OFFSET(fontcolor[30].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fc31",        "set foreground color", OFFSET(fontcolor[31].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"fontcolor_expr", "set foreground color expression", OFFSET(fontcolor_expr[0]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr0"      , "set foreground color expression", OFFSET(fontcolor_expr[0]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr1"      , "set foreground color expression", OFFSET(fontcolor_expr[1]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr2"      , "set foreground color expression", OFFSET(fontcolor_expr[2]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr3"      , "set foreground color expression", OFFSET(fontcolor_expr[3]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr4"      , "set foreground color expression", OFFSET(fontcolor_expr[4]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr5"      , "set foreground color expression", OFFSET(fontcolor_expr[5]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr6"      , "set foreground color expression", OFFSET(fontcolor_expr[6]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr7"      , "set foreground color expression", OFFSET(fontcolor_expr[7]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr8"      , "set foreground color expression", OFFSET(fontcolor_expr[8]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr9"      , "set foreground color expression", OFFSET(fontcolor_expr[9]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr10"     , "set foreground color expression", OFFSET(fontcolor_expr[10]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr11"     , "set foreground color expression", OFFSET(fontcolor_expr[11]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr12"     , "set foreground color expression", OFFSET(fontcolor_expr[12]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr13"     , "set foreground color expression", OFFSET(fontcolor_expr[13]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr14"     , "set foreground color expression", OFFSET(fontcolor_expr[14]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr15"     , "set foreground color expression", OFFSET(fontcolor_expr[15]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr16"     , "set foreground color expression", OFFSET(fontcolor_expr[16]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr17"     , "set foreground color expression", OFFSET(fontcolor_expr[17]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr18"     , "set foreground color expression", OFFSET(fontcolor_expr[18]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr19"     , "set foreground color expression", OFFSET(fontcolor_expr[19]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr20"     , "set foreground color expression", OFFSET(fontcolor_expr[20]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr21"     , "set foreground color expression", OFFSET(fontcolor_expr[21]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr22"     , "set foreground color expression", OFFSET(fontcolor_expr[22]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr23"     , "set foreground color expression", OFFSET(fontcolor_expr[23]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr24"     , "set foreground color expression", OFFSET(fontcolor_expr[24]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr25"     , "set foreground color expression", OFFSET(fontcolor_expr[25]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr26"     , "set foreground color expression", OFFSET(fontcolor_expr[26]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr27"     , "set foreground color expression", OFFSET(fontcolor_expr[27]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr28"     , "set foreground color expression", OFFSET(fontcolor_expr[28]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr29"     , "set foreground color expression", OFFSET(fontcolor_expr[29]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr30"     , "set foreground color expression", OFFSET(fontcolor_expr[30]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"fc_expr31"     , "set foreground color expression", OFFSET(fontcolor_expr[31]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS},
-    {"boxcolor",    "set box color",        OFFSET(boxcolor[0].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc0",         "set box color",        OFFSET(boxcolor[0].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc1",         "set box color",        OFFSET(boxcolor[1].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc2",         "set box color",        OFFSET(boxcolor[2].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc3",         "set box color",        OFFSET(boxcolor[3].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc4",         "set box color",        OFFSET(boxcolor[4].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc5",         "set box color",        OFFSET(boxcolor[5].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc6",         "set box color",        OFFSET(boxcolor[6].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc7",         "set box color",        OFFSET(boxcolor[7].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc8",         "set box color",        OFFSET(boxcolor[8].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc9",         "set box color",        OFFSET(boxcolor[9].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc10",        "set box color",        OFFSET(boxcolor[10].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc11",        "set box color",        OFFSET(boxcolor[11].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc12",        "set box color",        OFFSET(boxcolor[12].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc13",        "set box color",        OFFSET(boxcolor[13].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc14",        "set box color",        OFFSET(boxcolor[14].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc15",        "set box color",        OFFSET(boxcolor[15].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc16",        "set box color",        OFFSET(boxcolor[16].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc17",        "set box color",        OFFSET(boxcolor[17].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc18",        "set box color",        OFFSET(boxcolor[18].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc19",        "set box color",        OFFSET(boxcolor[19].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc20",        "set box color",        OFFSET(boxcolor[20].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc21",        "set box color",        OFFSET(boxcolor[21].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc22",        "set box color",        OFFSET(boxcolor[22].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc23",        "set box color",        OFFSET(boxcolor[23].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc24",        "set box color",        OFFSET(boxcolor[24].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc25",        "set box color",        OFFSET(boxcolor[25].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc26",        "set box color",        OFFSET(boxcolor[26].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc27",        "set box color",        OFFSET(boxcolor[27].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc28",        "set box color",        OFFSET(boxcolor[28].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc29",        "set box color",        OFFSET(boxcolor[29].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc30",        "set box color",        OFFSET(boxcolor[30].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bc31",        "set box color",        OFFSET(boxcolor[31].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
-    {"bordercolor", "set border color",     OFFSET(bordercolor.rgba),   AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"shadowcolor", "set shadow color",     OFFSET(shadowcolor.rgba),   AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
-    {"box",         "set box",              OFFSET(draw_box),           AV_OPT_TYPE_BOOL,   {.i64=0},     0,        1       , FLAGS},
-    {"boxborderw",  "set box borders width", OFFSET(boxborderw[0]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb0",         "set box borders width", OFFSET(boxborderw[0]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb1",         "set box borders width", OFFSET(boxborderw[1]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb2",         "set box borders width", OFFSET(boxborderw[2]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb3",         "set box borders width", OFFSET(boxborderw[3]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb4",         "set box borders width", OFFSET(boxborderw[4]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb5",         "set box borders width", OFFSET(boxborderw[5]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb6",         "set box borders width", OFFSET(boxborderw[6]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb7",         "set box borders width", OFFSET(boxborderw[7]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb8",         "set box borders width", OFFSET(boxborderw[8]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb9",         "set box borders width", OFFSET(boxborderw[9]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb10",        "set box borders width", OFFSET(boxborderw[10]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb11",        "set box borders width", OFFSET(boxborderw[11]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb12",        "set box borders width", OFFSET(boxborderw[12]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb13",        "set box borders width", OFFSET(boxborderw[13]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb14",        "set box borders width", OFFSET(boxborderw[14]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb15",        "set box borders width", OFFSET(boxborderw[15]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb16",        "set box borders width", OFFSET(boxborderw[16]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb17",        "set box borders width", OFFSET(boxborderw[17]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb18",        "set box borders width", OFFSET(boxborderw[18]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb19",        "set box borders width", OFFSET(boxborderw[19]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb20",        "set box borders width", OFFSET(boxborderw[20]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb21",        "set box borders width", OFFSET(boxborderw[21]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb22",        "set box borders width", OFFSET(boxborderw[22]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb23",        "set box borders width", OFFSET(boxborderw[23]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb24",        "set box borders width", OFFSET(boxborderw[24]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb25",        "set box borders width", OFFSET(boxborderw[25]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb26",        "set box borders width", OFFSET(boxborderw[26]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb27",        "set box borders width", OFFSET(boxborderw[27]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb28",        "set box borders width", OFFSET(boxborderw[28]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb29",        "set box borders width", OFFSET(boxborderw[29]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb30",        "set box borders width", OFFSET(boxborderw[30]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"bb31",        "set box borders width", OFFSET(boxborderw[31]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"line_spacing",  "set line spacing in pixels", OFFSET(line_spacing),   AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX,FLAGS},
-    {"fontsize",     "set font size",        OFFSET(fontsize_expr[0]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs0",          "set font size",        OFFSET(fontsize_expr[0]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs1",          "set font size",        OFFSET(fontsize_expr[1]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs2",          "set font size",        OFFSET(fontsize_expr[2]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs3",          "set font size",        OFFSET(fontsize_expr[3]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs4",          "set font size",        OFFSET(fontsize_expr[4]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs5",          "set font size",        OFFSET(fontsize_expr[5]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs6",          "set font size",        OFFSET(fontsize_expr[6]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs7",          "set font size",        OFFSET(fontsize_expr[7]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs8",          "set font size",        OFFSET(fontsize_expr[8]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs9",          "set font size",        OFFSET(fontsize_expr[9]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs10",         "set font size",        OFFSET(fontsize_expr[10]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs11",         "set font size",        OFFSET(fontsize_expr[11]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs12",         "set font size",        OFFSET(fontsize_expr[12]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs13",         "set font size",        OFFSET(fontsize_expr[13]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs14",         "set font size",        OFFSET(fontsize_expr[14]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs15",         "set font size",        OFFSET(fontsize_expr[15]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs16",         "set font size",        OFFSET(fontsize_expr[16]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs17",         "set font size",        OFFSET(fontsize_expr[17]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs18",         "set font size",        OFFSET(fontsize_expr[18]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs19",         "set font size",        OFFSET(fontsize_expr[19]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs20",         "set font size",        OFFSET(fontsize_expr[20]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs21",         "set font size",        OFFSET(fontsize_expr[21]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs22",         "set font size",        OFFSET(fontsize_expr[22]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs23",         "set font size",        OFFSET(fontsize_expr[23]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs24",         "set font size",        OFFSET(fontsize_expr[24]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs25",         "set font size",        OFFSET(fontsize_expr[25]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs26",         "set font size",        OFFSET(fontsize_expr[26]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs27",         "set font size",        OFFSET(fontsize_expr[27]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs28",         "set font size",        OFFSET(fontsize_expr[28]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs29",         "set font size",        OFFSET(fontsize_expr[29]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs30",         "set font size",        OFFSET(fontsize_expr[30]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"fs31",         "set font size",        OFFSET(fontsize_expr[31]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS},
-    {"x",            "set x expression",     OFFSET(x_expr[0]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y",            "set y expression",     OFFSET(y_expr[0]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x0",           "set x expression",     OFFSET(x_expr[0]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y0",           "set y expression",     OFFSET(y_expr[0]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x1",           "set x expression",     OFFSET(x_expr[1]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y1",           "set y expression",     OFFSET(y_expr[1]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x2",           "set x expression",     OFFSET(x_expr[2]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y2",           "set y expression",     OFFSET(y_expr[2]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x3",           "set x expression",     OFFSET(x_expr[3]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y3",           "set y expression",     OFFSET(y_expr[3]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x4",           "set x expression",     OFFSET(x_expr[4]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y4",           "set y expression",     OFFSET(y_expr[4]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x5",           "set x expression",     OFFSET(x_expr[5]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y5",           "set y expression",     OFFSET(y_expr[5]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x6",           "set x expression",     OFFSET(x_expr[6]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y6",           "set y expression",     OFFSET(y_expr[6]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x7",           "set x expression",     OFFSET(x_expr[7]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y7",           "set y expression",     OFFSET(y_expr[7]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x8",           "set x expression",     OFFSET(x_expr[8]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y8",           "set y expression",     OFFSET(y_expr[8]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x9",           "set x expression",     OFFSET(x_expr[9]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y9",           "set y expression",     OFFSET(y_expr[9]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x10",          "set x expression",     OFFSET(x_expr[10]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y10",          "set y expression",     OFFSET(y_expr[10]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x11",          "set x expression",     OFFSET(x_expr[11]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y11",          "set y expression",     OFFSET(y_expr[11]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x12",          "set x expression",     OFFSET(x_expr[12]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y12",          "set y expression",     OFFSET(y_expr[12]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x13",          "set x expression",     OFFSET(x_expr[13]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y13",          "set y expression",     OFFSET(y_expr[13]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x14",          "set x expression",     OFFSET(x_expr[14]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y14",          "set y expression",     OFFSET(y_expr[14]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x15",          "set x expression",     OFFSET(x_expr[15]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y15",          "set y expression",     OFFSET(y_expr[15]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x16",          "set x expression",     OFFSET(x_expr[16]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y16",          "set y expression",     OFFSET(y_expr[16]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x17",          "set x expression",     OFFSET(x_expr[17]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y17",          "set y expression",     OFFSET(y_expr[17]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x18",          "set x expression",     OFFSET(x_expr[18]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y18",          "set y expression",     OFFSET(y_expr[18]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x19",          "set x expression",     OFFSET(x_expr[19]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y19",          "set y expression",     OFFSET(y_expr[19]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x20",          "set x expression",     OFFSET(x_expr[20]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y20",          "set y expression",     OFFSET(y_expr[20]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x21",          "set x expression",     OFFSET(x_expr[21]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y21",          "set y expression",     OFFSET(y_expr[21]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x22",          "set x expression",     OFFSET(x_expr[22]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y22",          "set y expression",     OFFSET(y_expr[22]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x23",          "set x expression",     OFFSET(x_expr[23]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y23",          "set y expression",     OFFSET(y_expr[23]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x24",          "set x expression",     OFFSET(x_expr[24]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y24",          "set y expression",     OFFSET(y_expr[24]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x25",          "set x expression",     OFFSET(x_expr[25]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y25",          "set y expression",     OFFSET(y_expr[25]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x26",          "set x expression",     OFFSET(x_expr[26]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y26",          "set y expression",     OFFSET(y_expr[26]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x27",          "set x expression",     OFFSET(x_expr[27]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y27",          "set y expression",     OFFSET(y_expr[27]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x28",          "set x expression",     OFFSET(x_expr[28]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y28",          "set y expression",     OFFSET(y_expr[28]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x29",          "set x expression",     OFFSET(x_expr[29]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y29",          "set y expression",     OFFSET(y_expr[29]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x30",          "set x expression",     OFFSET(x_expr[30]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y30",          "set y expression",     OFFSET(y_expr[30]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"x31",          "set x expression",     OFFSET(x_expr[31]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"y31",          "set y expression",     OFFSET(y_expr[31]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
-    {"shadowx",     "set shadow x offset",  OFFSET(shadowx),            AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX , FLAGS},
-    {"shadowy",     "set shadow y offset",  OFFSET(shadowy),            AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX , FLAGS},
-    {"borderw",     "set border width",     OFFSET(borderw),            AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX , FLAGS},
-    {"tabsize",     "set tab size",         OFFSET(tabsize[0]),         AV_OPT_TYPE_INT,    {.i64=4},     0,        INT_MAX , FLAGS},
-    {"basetime",    "set base time",        OFFSET(basetime),           AV_OPT_TYPE_INT64,  {.i64=AV_NOPTS_VALUE}, INT64_MIN, INT64_MAX , FLAGS},
+static const AVOption ni_drawtext_options[] = {
+    { "fontfile",    "set font file",        OFFSET(fontfile[0]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff0",         "set font file",        OFFSET(fontfile[0]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff1",         "set font file",        OFFSET(fontfile[1]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff2",         "set font file",        OFFSET(fontfile[2]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff3",         "set font file",        OFFSET(fontfile[3]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff4",         "set font file",        OFFSET(fontfile[4]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff5",         "set font file",        OFFSET(fontfile[5]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff6",         "set font file",        OFFSET(fontfile[6]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff7",         "set font file",        OFFSET(fontfile[7]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff8",         "set font file",        OFFSET(fontfile[8]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff9",         "set font file",        OFFSET(fontfile[9]),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff10",        "set font file",        OFFSET(fontfile[10]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff11",        "set font file",        OFFSET(fontfile[11]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff12",        "set font file",        OFFSET(fontfile[12]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff13",        "set font file",        OFFSET(fontfile[13]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff14",        "set font file",        OFFSET(fontfile[14]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff15",        "set font file",        OFFSET(fontfile[15]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff16",        "set font file",        OFFSET(fontfile[16]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff17",        "set font file",        OFFSET(fontfile[17]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff18",        "set font file",        OFFSET(fontfile[18]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff19",        "set font file",        OFFSET(fontfile[19]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff20",        "set font file",        OFFSET(fontfile[20]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff21",        "set font file",        OFFSET(fontfile[21]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff22",        "set font file",        OFFSET(fontfile[22]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff23",        "set font file",        OFFSET(fontfile[23]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff24",        "set font file",        OFFSET(fontfile[24]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff25",        "set font file",        OFFSET(fontfile[25]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff26",        "set font file",        OFFSET(fontfile[26]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff27",        "set font file",        OFFSET(fontfile[27]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff28",        "set font file",        OFFSET(fontfile[28]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff29",        "set font file",        OFFSET(fontfile[29]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff30",        "set font file",        OFFSET(fontfile[30]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "ff31",        "set font file",        OFFSET(fontfile[31]),          AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "text",        "set text",             OFFSET(text[0]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t0",          "set text",             OFFSET(text[0]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t1",          "set text",             OFFSET(text[1]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t2",          "set text",             OFFSET(text[2]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t3",          "set text",             OFFSET(text[3]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t4",          "set text",             OFFSET(text[4]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t5",          "set text",             OFFSET(text[5]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t6",          "set text",             OFFSET(text[6]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t7",          "set text",             OFFSET(text[7]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t8",          "set text",             OFFSET(text[8]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t9",          "set text",             OFFSET(text[9]),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t10",         "set text",             OFFSET(text[10]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t11",         "set text",             OFFSET(text[11]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t12",         "set text",             OFFSET(text[12]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t13",         "set text",             OFFSET(text[13]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t14",         "set text",             OFFSET(text[14]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t15",         "set text",             OFFSET(text[15]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t16",         "set text",             OFFSET(text[16]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t17",         "set text",             OFFSET(text[17]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t18",         "set text",             OFFSET(text[18]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t19",         "set text",             OFFSET(text[19]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t20",         "set text",             OFFSET(text[20]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t21",         "set text",             OFFSET(text[21]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t22",         "set text",             OFFSET(text[22]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t23",         "set text",             OFFSET(text[23]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t24",         "set text",             OFFSET(text[24]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t25",         "set text",             OFFSET(text[25]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t26",         "set text",             OFFSET(text[26]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t27",         "set text",             OFFSET(text[27]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t28",         "set text",             OFFSET(text[28]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t29",         "set text",             OFFSET(text[29]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t30",         "set text",             OFFSET(text[30]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "t31",         "set text",             OFFSET(text[31]),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "textfile",    "set text file",        OFFSET(textfile),              AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS },
+    { "fontcolor",   "set foreground color", OFFSET(fontcolor[0].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc0",         "set foreground color", OFFSET(fontcolor[0].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc1",         "set foreground color", OFFSET(fontcolor[1].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc2",         "set foreground color", OFFSET(fontcolor[2].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc3",         "set foreground color", OFFSET(fontcolor[3].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc4",         "set foreground color", OFFSET(fontcolor[4].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc5",         "set foreground color", OFFSET(fontcolor[5].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc6",         "set foreground color", OFFSET(fontcolor[6].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc7",         "set foreground color", OFFSET(fontcolor[7].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc8",         "set foreground color", OFFSET(fontcolor[8].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc9",         "set foreground color", OFFSET(fontcolor[9].rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc10",        "set foreground color", OFFSET(fontcolor[10].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc11",        "set foreground color", OFFSET(fontcolor[11].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc12",        "set foreground color", OFFSET(fontcolor[12].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc13",        "set foreground color", OFFSET(fontcolor[13].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc14",        "set foreground color", OFFSET(fontcolor[14].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc15",        "set foreground color", OFFSET(fontcolor[15].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc16",        "set foreground color", OFFSET(fontcolor[16].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc17",        "set foreground color", OFFSET(fontcolor[17].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc18",        "set foreground color", OFFSET(fontcolor[18].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc19",        "set foreground color", OFFSET(fontcolor[19].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc20",        "set foreground color", OFFSET(fontcolor[20].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc21",        "set foreground color", OFFSET(fontcolor[21].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc22",        "set foreground color", OFFSET(fontcolor[22].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc23",        "set foreground color", OFFSET(fontcolor[23].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc24",        "set foreground color", OFFSET(fontcolor[24].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc25",        "set foreground color", OFFSET(fontcolor[25].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc26",        "set foreground color", OFFSET(fontcolor[26].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc27",        "set foreground color", OFFSET(fontcolor[27].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc28",        "set foreground color", OFFSET(fontcolor[28].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc29",        "set foreground color", OFFSET(fontcolor[29].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc30",        "set foreground color", OFFSET(fontcolor[30].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fc31",        "set foreground color", OFFSET(fontcolor[31].rgba),    AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "fontcolor_expr", "set foreground color expression", OFFSET(fontcolor_expr[0]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr0",    "set foreground color expression", OFFSET(fontcolor_expr[0]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr1",    "set foreground color expression", OFFSET(fontcolor_expr[1]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr2",    "set foreground color expression", OFFSET(fontcolor_expr[2]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr3",    "set foreground color expression", OFFSET(fontcolor_expr[3]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr4",    "set foreground color expression", OFFSET(fontcolor_expr[4]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr5",    "set foreground color expression", OFFSET(fontcolor_expr[5]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr6",    "set foreground color expression", OFFSET(fontcolor_expr[6]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr7",    "set foreground color expression", OFFSET(fontcolor_expr[7]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr8",    "set foreground color expression", OFFSET(fontcolor_expr[8]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr9",    "set foreground color expression", OFFSET(fontcolor_expr[9]),   AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr10",   "set foreground color expression", OFFSET(fontcolor_expr[10]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr11",   "set foreground color expression", OFFSET(fontcolor_expr[11]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr12",   "set foreground color expression", OFFSET(fontcolor_expr[12]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr13",   "set foreground color expression", OFFSET(fontcolor_expr[13]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr14",   "set foreground color expression", OFFSET(fontcolor_expr[14]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr15",   "set foreground color expression", OFFSET(fontcolor_expr[15]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr16",   "set foreground color expression", OFFSET(fontcolor_expr[16]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr17",   "set foreground color expression", OFFSET(fontcolor_expr[17]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr18",   "set foreground color expression", OFFSET(fontcolor_expr[18]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr19",   "set foreground color expression", OFFSET(fontcolor_expr[19]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr20",   "set foreground color expression", OFFSET(fontcolor_expr[20]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr21",   "set foreground color expression", OFFSET(fontcolor_expr[21]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr22",   "set foreground color expression", OFFSET(fontcolor_expr[22]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr23",   "set foreground color expression", OFFSET(fontcolor_expr[23]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr24",   "set foreground color expression", OFFSET(fontcolor_expr[24]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr25",   "set foreground color expression", OFFSET(fontcolor_expr[25]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr26",   "set foreground color expression", OFFSET(fontcolor_expr[26]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr27",   "set foreground color expression", OFFSET(fontcolor_expr[27]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr28",   "set foreground color expression", OFFSET(fontcolor_expr[28]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr29",   "set foreground color expression", OFFSET(fontcolor_expr[29]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr30",   "set foreground color expression", OFFSET(fontcolor_expr[30]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "fc_expr31",   "set foreground color expression", OFFSET(fontcolor_expr[31]),  AV_OPT_TYPE_STRING,  {.str=NULL}, 0, 0, FLAGS },
+    { "boxcolor",    "set box color",        OFFSET(boxcolor[0].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc0",         "set box color",        OFFSET(boxcolor[0].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc1",         "set box color",        OFFSET(boxcolor[1].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc2",         "set box color",        OFFSET(boxcolor[2].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc3",         "set box color",        OFFSET(boxcolor[3].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc4",         "set box color",        OFFSET(boxcolor[4].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc5",         "set box color",        OFFSET(boxcolor[5].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc6",         "set box color",        OFFSET(boxcolor[6].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc7",         "set box color",        OFFSET(boxcolor[7].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc8",         "set box color",        OFFSET(boxcolor[8].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc9",         "set box color",        OFFSET(boxcolor[9].rgba),   AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc10",        "set box color",        OFFSET(boxcolor[10].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc11",        "set box color",        OFFSET(boxcolor[11].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc12",        "set box color",        OFFSET(boxcolor[12].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc13",        "set box color",        OFFSET(boxcolor[13].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc14",        "set box color",        OFFSET(boxcolor[14].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc15",        "set box color",        OFFSET(boxcolor[15].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc16",        "set box color",        OFFSET(boxcolor[16].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc17",        "set box color",        OFFSET(boxcolor[17].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc18",        "set box color",        OFFSET(boxcolor[18].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc19",        "set box color",        OFFSET(boxcolor[19].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc20",        "set box color",        OFFSET(boxcolor[20].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc21",        "set box color",        OFFSET(boxcolor[21].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc22",        "set box color",        OFFSET(boxcolor[22].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc23",        "set box color",        OFFSET(boxcolor[23].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc24",        "set box color",        OFFSET(boxcolor[24].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc25",        "set box color",        OFFSET(boxcolor[25].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc26",        "set box color",        OFFSET(boxcolor[26].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc27",        "set box color",        OFFSET(boxcolor[27].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc28",        "set box color",        OFFSET(boxcolor[28].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc29",        "set box color",        OFFSET(boxcolor[29].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc30",        "set box color",        OFFSET(boxcolor[30].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bc31",        "set box color",        OFFSET(boxcolor[31].rgba),  AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS },
+    { "bordercolor", "set border color",     OFFSET(bordercolor.rgba),   AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "shadowcolor", "set shadow color",     OFFSET(shadowcolor.rgba),   AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS },
+    { "box",         "set box",              OFFSET(draw_box),           AV_OPT_TYPE_BOOL,   {.i64=0},     0,        1       , FLAGS },
+    { "boxborderw",  "set box borders width", OFFSET(boxborderw[0]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb0",         "set box borders width", OFFSET(boxborderw[0]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb1",         "set box borders width", OFFSET(boxborderw[1]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb2",         "set box borders width", OFFSET(boxborderw[2]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb3",         "set box borders width", OFFSET(boxborderw[3]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb4",         "set box borders width", OFFSET(boxborderw[4]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb5",         "set box borders width", OFFSET(boxborderw[5]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb6",         "set box borders width", OFFSET(boxborderw[6]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb7",         "set box borders width", OFFSET(boxborderw[7]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb8",         "set box borders width", OFFSET(boxborderw[8]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb9",         "set box borders width", OFFSET(boxborderw[9]),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb10",        "set box borders width", OFFSET(boxborderw[10]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb11",        "set box borders width", OFFSET(boxborderw[11]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb12",        "set box borders width", OFFSET(boxborderw[12]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb13",        "set box borders width", OFFSET(boxborderw[13]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb14",        "set box borders width", OFFSET(boxborderw[14]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb15",        "set box borders width", OFFSET(boxborderw[15]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb16",        "set box borders width", OFFSET(boxborderw[16]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb17",        "set box borders width", OFFSET(boxborderw[17]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb18",        "set box borders width", OFFSET(boxborderw[18]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb19",        "set box borders width", OFFSET(boxborderw[19]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb20",        "set box borders width", OFFSET(boxborderw[20]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb21",        "set box borders width", OFFSET(boxborderw[21]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb22",        "set box borders width", OFFSET(boxborderw[22]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb23",        "set box borders width", OFFSET(boxborderw[23]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb24",        "set box borders width", OFFSET(boxborderw[24]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb25",        "set box borders width", OFFSET(boxborderw[25]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb26",        "set box borders width", OFFSET(boxborderw[26]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb27",        "set box borders width", OFFSET(boxborderw[27]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb28",        "set box borders width", OFFSET(boxborderw[28]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb29",        "set box borders width", OFFSET(boxborderw[29]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb30",        "set box borders width", OFFSET(boxborderw[30]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "bb31",        "set box borders width", OFFSET(boxborderw[31]),       AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "line_spacing",  "set line spacing in pixels", OFFSET(line_spacing),   AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX,FLAGS },
+    { "fontsize",     "set font size",        OFFSET(fontsize_expr[0]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs0",          "set font size",        OFFSET(fontsize_expr[0]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs1",          "set font size",        OFFSET(fontsize_expr[1]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs2",          "set font size",        OFFSET(fontsize_expr[2]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs3",          "set font size",        OFFSET(fontsize_expr[3]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs4",          "set font size",        OFFSET(fontsize_expr[4]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs5",          "set font size",        OFFSET(fontsize_expr[5]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs6",          "set font size",        OFFSET(fontsize_expr[6]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs7",          "set font size",        OFFSET(fontsize_expr[7]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs8",          "set font size",        OFFSET(fontsize_expr[8]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs9",          "set font size",        OFFSET(fontsize_expr[9]),      AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs10",         "set font size",        OFFSET(fontsize_expr[10]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs11",         "set font size",        OFFSET(fontsize_expr[11]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs12",         "set font size",        OFFSET(fontsize_expr[12]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs13",         "set font size",        OFFSET(fontsize_expr[13]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs14",         "set font size",        OFFSET(fontsize_expr[14]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs15",         "set font size",        OFFSET(fontsize_expr[15]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs16",         "set font size",        OFFSET(fontsize_expr[16]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs17",         "set font size",        OFFSET(fontsize_expr[17]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs18",         "set font size",        OFFSET(fontsize_expr[18]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs19",         "set font size",        OFFSET(fontsize_expr[19]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs20",         "set font size",        OFFSET(fontsize_expr[20]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs21",         "set font size",        OFFSET(fontsize_expr[21]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs22",         "set font size",        OFFSET(fontsize_expr[22]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs23",         "set font size",        OFFSET(fontsize_expr[23]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs24",         "set font size",        OFFSET(fontsize_expr[24]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs25",         "set font size",        OFFSET(fontsize_expr[25]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs26",         "set font size",        OFFSET(fontsize_expr[26]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs27",         "set font size",        OFFSET(fontsize_expr[27]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs28",         "set font size",        OFFSET(fontsize_expr[28]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs29",         "set font size",        OFFSET(fontsize_expr[29]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs30",         "set font size",        OFFSET(fontsize_expr[30]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "fs31",         "set font size",        OFFSET(fontsize_expr[31]),     AV_OPT_TYPE_STRING, {.str="36"},  0, 0 , FLAGS },
+    { "x",            "set x expression",     OFFSET(x_expr[0]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y",            "set y expression",     OFFSET(y_expr[0]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x0",           "set x expression",     OFFSET(x_expr[0]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y0",           "set y expression",     OFFSET(y_expr[0]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x1",           "set x expression",     OFFSET(x_expr[1]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y1",           "set y expression",     OFFSET(y_expr[1]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x2",           "set x expression",     OFFSET(x_expr[2]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y2",           "set y expression",     OFFSET(y_expr[2]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x3",           "set x expression",     OFFSET(x_expr[3]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y3",           "set y expression",     OFFSET(y_expr[3]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x4",           "set x expression",     OFFSET(x_expr[4]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y4",           "set y expression",     OFFSET(y_expr[4]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x5",           "set x expression",     OFFSET(x_expr[5]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y5",           "set y expression",     OFFSET(y_expr[5]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x6",           "set x expression",     OFFSET(x_expr[6]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y6",           "set y expression",     OFFSET(y_expr[6]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x7",           "set x expression",     OFFSET(x_expr[7]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y7",           "set y expression",     OFFSET(y_expr[7]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x8",           "set x expression",     OFFSET(x_expr[8]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y8",           "set y expression",     OFFSET(y_expr[8]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x9",           "set x expression",     OFFSET(x_expr[9]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y9",           "set y expression",     OFFSET(y_expr[9]),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x10",          "set x expression",     OFFSET(x_expr[10]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y10",          "set y expression",     OFFSET(y_expr[10]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x11",          "set x expression",     OFFSET(x_expr[11]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y11",          "set y expression",     OFFSET(y_expr[11]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x12",          "set x expression",     OFFSET(x_expr[12]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y12",          "set y expression",     OFFSET(y_expr[12]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x13",          "set x expression",     OFFSET(x_expr[13]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y13",          "set y expression",     OFFSET(y_expr[13]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x14",          "set x expression",     OFFSET(x_expr[14]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y14",          "set y expression",     OFFSET(y_expr[14]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x15",          "set x expression",     OFFSET(x_expr[15]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y15",          "set y expression",     OFFSET(y_expr[15]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x16",          "set x expression",     OFFSET(x_expr[16]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y16",          "set y expression",     OFFSET(y_expr[16]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x17",          "set x expression",     OFFSET(x_expr[17]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y17",          "set y expression",     OFFSET(y_expr[17]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x18",          "set x expression",     OFFSET(x_expr[18]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y18",          "set y expression",     OFFSET(y_expr[18]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x19",          "set x expression",     OFFSET(x_expr[19]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y19",          "set y expression",     OFFSET(y_expr[19]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x20",          "set x expression",     OFFSET(x_expr[20]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y20",          "set y expression",     OFFSET(y_expr[20]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x21",          "set x expression",     OFFSET(x_expr[21]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y21",          "set y expression",     OFFSET(y_expr[21]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x22",          "set x expression",     OFFSET(x_expr[22]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y22",          "set y expression",     OFFSET(y_expr[22]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x23",          "set x expression",     OFFSET(x_expr[23]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y23",          "set y expression",     OFFSET(y_expr[23]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x24",          "set x expression",     OFFSET(x_expr[24]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y24",          "set y expression",     OFFSET(y_expr[24]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x25",          "set x expression",     OFFSET(x_expr[25]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y25",          "set y expression",     OFFSET(y_expr[25]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x26",          "set x expression",     OFFSET(x_expr[26]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y26",          "set y expression",     OFFSET(y_expr[26]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x27",          "set x expression",     OFFSET(x_expr[27]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y27",          "set y expression",     OFFSET(y_expr[27]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x28",          "set x expression",     OFFSET(x_expr[28]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y28",          "set y expression",     OFFSET(y_expr[28]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x29",          "set x expression",     OFFSET(x_expr[29]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y29",          "set y expression",     OFFSET(y_expr[29]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x30",          "set x expression",     OFFSET(x_expr[30]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y30",          "set y expression",     OFFSET(y_expr[30]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "x31",          "set x expression",     OFFSET(x_expr[31]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "y31",          "set y expression",     OFFSET(y_expr[31]),            AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS },
+    { "shadowx",     "set shadow x offset",  OFFSET(shadowx),            AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX , FLAGS },
+    { "shadowy",     "set shadow y offset",  OFFSET(shadowy),            AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX , FLAGS },
+    { "borderw",     "set border width",     OFFSET(borderw),            AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX , FLAGS },
+    { "tabsize",     "set tab size",         OFFSET(tabsize[0]),         AV_OPT_TYPE_INT,    {.i64=4},     0,        INT_MAX , FLAGS },
+    { "basetime",    "set base time",        OFFSET(basetime),           AV_OPT_TYPE_INT64,  {.i64=AV_NOPTS_VALUE}, INT64_MIN, INT64_MAX , FLAGS },
 #if CONFIG_LIBFONTCONFIG
-    {"font",      "Font name",            OFFSET(font[0]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f0",        "Font name",            OFFSET(font[0]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f1",        "Font name",            OFFSET(font[1]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f2",        "Font name",            OFFSET(font[2]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f3",        "Font name",            OFFSET(font[3]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f4",        "Font name",            OFFSET(font[4]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f5",        "Font name",            OFFSET(font[5]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f6",        "Font name",            OFFSET(font[6]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f7",        "Font name",            OFFSET(font[7]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f8",        "Font name",            OFFSET(font[8]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f9",        "Font name",            OFFSET(font[9]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f10",       "Font name",            OFFSET(font[10]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f11",       "Font name",            OFFSET(font[11]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f12",       "Font name",            OFFSET(font[12]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f13",       "Font name",            OFFSET(font[13]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f14",       "Font name",            OFFSET(font[14]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f15",       "Font name",            OFFSET(font[15]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f16",       "Font name",            OFFSET(font[16]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f17",       "Font name",            OFFSET(font[17]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f18",       "Font name",            OFFSET(font[18]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f19",       "Font name",            OFFSET(font[19]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f20",       "Font name",            OFFSET(font[20]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f21",       "Font name",            OFFSET(font[21]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f22",       "Font name",            OFFSET(font[22]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f23",       "Font name",            OFFSET(font[23]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f24",       "Font name",            OFFSET(font[24]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f25",       "Font name",            OFFSET(font[25]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f26",       "Font name",            OFFSET(font[26]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f27",       "Font name",            OFFSET(font[27]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f28",       "Font name",            OFFSET(font[28]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f29",       "Font name",            OFFSET(font[29]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f30",       "Font name",            OFFSET(font[30]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-    {"f31",       "Font name",            OFFSET(font[31]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
+    { "font",      "Font name",            OFFSET(font[0]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f0",        "Font name",            OFFSET(font[0]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f1",        "Font name",            OFFSET(font[1]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f2",        "Font name",            OFFSET(font[2]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f3",        "Font name",            OFFSET(font[3]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f4",        "Font name",            OFFSET(font[4]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f5",        "Font name",            OFFSET(font[5]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f6",        "Font name",            OFFSET(font[6]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f7",        "Font name",            OFFSET(font[7]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f8",        "Font name",            OFFSET(font[8]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f9",        "Font name",            OFFSET(font[9]),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f10",       "Font name",            OFFSET(font[10]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f11",       "Font name",            OFFSET(font[11]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f12",       "Font name",            OFFSET(font[12]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f13",       "Font name",            OFFSET(font[13]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f14",       "Font name",            OFFSET(font[14]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f15",       "Font name",            OFFSET(font[15]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f16",       "Font name",            OFFSET(font[16]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f17",       "Font name",            OFFSET(font[17]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f18",       "Font name",            OFFSET(font[18]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f19",       "Font name",            OFFSET(font[19]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f20",       "Font name",            OFFSET(font[20]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f21",       "Font name",            OFFSET(font[21]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f22",       "Font name",            OFFSET(font[22]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f23",       "Font name",            OFFSET(font[23]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f24",       "Font name",            OFFSET(font[24]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f25",       "Font name",            OFFSET(font[25]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f26",       "Font name",            OFFSET(font[26]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f27",       "Font name",            OFFSET(font[27]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f28",       "Font name",            OFFSET(font[28]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f29",       "Font name",            OFFSET(font[29]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f30",       "Font name",            OFFSET(font[30]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
+    { "f31",       "Font name",            OFFSET(font[31]),              AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS  },
 #endif
-
-    {"expansion", "set the expansion mode", OFFSET(exp_mode), AV_OPT_TYPE_INT, {.i64=EXP_NORMAL}, 0, 2, FLAGS, "expansion"},
-        {"none",     "set no expansion",                    OFFSET(exp_mode), AV_OPT_TYPE_CONST, {.i64=EXP_NONE},     0, 0, FLAGS, "expansion"},
-        {"normal",   "set normal expansion",                OFFSET(exp_mode), AV_OPT_TYPE_CONST, {.i64=EXP_NORMAL},   0, 0, FLAGS, "expansion"},
-        {"strftime", "set strftime expansion (deprecated)", OFFSET(exp_mode), AV_OPT_TYPE_CONST, {.i64=EXP_STRFTIME}, 0, 0, FLAGS, "expansion"},
-
-    {"timecode",        "set initial timecode",             OFFSET(tc_opt_string), AV_OPT_TYPE_STRING,   {.str=NULL}, 0, 0, FLAGS},
-    {"tc24hmax",        "set 24 hours max (timecode only)", OFFSET(tc24hmax),      AV_OPT_TYPE_BOOL,     {.i64=0},           0,        1, FLAGS},
-    {"timecode_rate",   "set rate (timecode only)",         OFFSET(tc_rate),       AV_OPT_TYPE_RATIONAL, {.dbl=0},           0,  INT_MAX, FLAGS},
-    {"r",               "set rate (timecode only)",         OFFSET(tc_rate),       AV_OPT_TYPE_RATIONAL, {.dbl=0},           0,  INT_MAX, FLAGS},
-    {"rate",            "set rate (timecode only)",         OFFSET(tc_rate),       AV_OPT_TYPE_RATIONAL, {.dbl=0},           0,  INT_MAX, FLAGS},
-    {"reload",     "reload text file for each frame",                       OFFSET(reload),     AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    { "alpha",       "apply alpha while rendering", OFFSET(a_expr),      AV_OPT_TYPE_STRING, { .str = "1"     },          .flags = FLAGS },
-    {"fix_bounds", "check and fix text coords to avoid clipping", OFFSET(fix_bounds), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    {"start_number", "start frame number for n/frame_num variable", OFFSET(start_number), AV_OPT_TYPE_INT, {.i64=0}, 0, INT_MAX, FLAGS},
+    { "expansion", "set the expansion mode", OFFSET(exp_mode), AV_OPT_TYPE_INT, {.i64=EXP_NORMAL}, 0, 2, FLAGS, "expansion" },
+        { "none",     "set no expansion",                    OFFSET(exp_mode), AV_OPT_TYPE_CONST, {.i64=EXP_NONE},     0, 0, FLAGS, "expansion" },
+        { "normal",   "set normal expansion",                OFFSET(exp_mode), AV_OPT_TYPE_CONST, {.i64=EXP_NORMAL},   0, 0, FLAGS, "expansion" },
+        { "strftime", "set strftime expansion (deprecated)", OFFSET(exp_mode), AV_OPT_TYPE_CONST, {.i64=EXP_STRFTIME}, 0, 0, FLAGS, "expansion" },
+    { "timecode",        "set initial timecode",             OFFSET(tc_opt_string), AV_OPT_TYPE_STRING,   {.str=NULL}, 0, 0, FLAGS },
+    { "tc24hmax",        "set 24 hours max (timecode only)", OFFSET(tc24hmax),      AV_OPT_TYPE_BOOL,     {.i64=0},    0,        1, FLAGS },
+    { "timecode_rate",   "set rate (timecode only)",         OFFSET(tc_rate),       AV_OPT_TYPE_RATIONAL, {.dbl=0},    0,  INT_MAX, FLAGS },
+    { "r",               "set rate (timecode only)",         OFFSET(tc_rate),       AV_OPT_TYPE_RATIONAL, {.dbl=0},    0,  INT_MAX, FLAGS },
+    { "rate",            "set rate (timecode only)",         OFFSET(tc_rate),       AV_OPT_TYPE_RATIONAL, {.dbl=0},    0,  INT_MAX, FLAGS },
+    { "reload",     "reload text file for each frame",                       OFFSET(reload),     AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS },
+    {  "alpha",       "apply alpha while rendering", OFFSET(a_expr),      AV_OPT_TYPE_STRING, { .str = "1"     },          .flags = FLAGS  },
+    { "fix_bounds", "check and fix text coords to avoid clipping", OFFSET(fix_bounds), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS },
+    { "start_number", "start frame number for n/frame_num variable", OFFSET(start_number), AV_OPT_TYPE_INT, {.i64=0}, 0, INT_MAX, FLAGS },
 
 #if CONFIG_LIBFRIBIDI
-    {"text_shaping", "attempt to shape text before drawing", OFFSET(text_shaping), AV_OPT_TYPE_BOOL, {.i64=1}, 0, 1, FLAGS},
+    { "text_shaping", "attempt to shape text before drawing", OFFSET(text_shaping), AV_OPT_TYPE_BOOL, {.i64=1}, 0, 1, FLAGS },
 #endif
 
     /* FT_LOAD_* flags */
@@ -666,34 +667,15 @@ static const AVOption nidrawtext_options[]= {
         { "monochrome",                  NULL, 0, AV_OPT_TYPE_CONST, { .i64 = FT_LOAD_MONOCHROME },                  .flags = FLAGS, .unit = "ft_load_flags" },
         { "linear_design",               NULL, 0, AV_OPT_TYPE_CONST, { .i64 = FT_LOAD_LINEAR_DESIGN },               .flags = FLAGS, .unit = "ft_load_flags" },
         { "no_autohint",                 NULL, 0, AV_OPT_TYPE_CONST, { .i64 = FT_LOAD_NO_AUTOHINT },                 .flags = FLAGS, .unit = "ft_load_flags" },
-    {"optimize_upload", "Decrease the drawtext frame uploading frequency", OFFSET(optimize_upload), AV_OPT_TYPE_BOOL, {.i64=1}, 0, 1, FLAGS},
-    { "keep_alive_timeout",
-      "Specify a custom session keep alive timeout in seconds.",
-      OFFSET(keep_alive_timeout),
-      AV_OPT_TYPE_INT,
-      {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT},
-      NI_MIN_KEEP_ALIVE_TIMEOUT,
-      NI_MAX_KEEP_ALIVE_TIMEOUT,
-      FLAGS,
-      "keep_alive_timeout"},
-    { "buffer_limit",
-      "Whether to limit output buffering count, 0: no, 1: yes",
-      OFFSET(buffer_limit),
-      AV_OPT_TYPE_BOOL,
-      {.i64 = 0},
-      0,
-      1},
-    { "use_watermark",
-      "Whether to use watermark or not, 0: no, 1: yes",
-      OFFSET(use_watermark),
-      AV_OPT_TYPE_BOOL,
-      {.i64 = 1},
-      0,
-      1},
+    { "optimize_upload", "Decrease the drawtext frame uploading frequency", OFFSET(optimize_upload), AV_OPT_TYPE_BOOL, {.i64=1}, 0, 1, FLAGS},
+    { "use_watermark", "Use performance optimizations", OFFSET(use_watermark), AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, FLAGS }, // Deprecated language
+    { "perf_optimization", "Use performance optimizations", OFFSET(use_watermark),       AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, FLAGS },
+    NI_FILT_OPTION_KEEPALIVE,
+    NI_FILT_OPTION_BUFFER_LIMIT,
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(nidrawtext);
+AVFILTER_DEFINE_CLASS(ni_drawtext);
 
 #undef __FTERRORS_H__
 #define FT_ERROR_START_LIST {
@@ -727,9 +709,9 @@ static int glyph_cmp(const void *key, const void *b)
     int64_t diff = (int64_t)a->code - (int64_t)bb->code;
 
     if (diff != 0)
-         return diff > 0 ? 1 : -1;
+        return diff > 0 ? 1 : -1;
     else
-         return FFDIFFSIGN((int64_t)a->fontsize, (int64_t)bb->fontsize);
+        return FFDIFFSIGN((int64_t)a->fontsize, (int64_t)bb->fontsize);
 }
 
 /**
@@ -737,7 +719,7 @@ static int glyph_cmp(const void *key, const void *b)
  */
 static int load_glyph(AVFilterContext *ctx, Glyph **glyph_ptr, uint32_t code, int index)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     FT_BitmapGlyph bitmapglyph;
     Glyph *glyph, dummy = { 0 };
     struct AVTreeNode *node = NULL;
@@ -886,7 +868,7 @@ static int ff_to_ni_pix_fmt(int ff_av_pix_fmt)
 static av_cold int set_fontsize(AVFilterContext *ctx, unsigned int fontsize, int index)
 {
     int err;
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
 
     if ((err = FT_Set_Pixel_Sizes(s->face[index], 0, fontsize))) {
         av_log(ctx, AV_LOG_ERROR, "Could not set font size to %d pixels: %s\n",
@@ -901,7 +883,7 @@ static av_cold int set_fontsize(AVFilterContext *ctx, unsigned int fontsize, int
 
 static av_cold int parse_fontsize(AVFilterContext *ctx, int index)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     int err;
 
     if (s->fontsize_pexpr[index])
@@ -919,7 +901,7 @@ static av_cold int parse_fontsize(AVFilterContext *ctx, int index)
 
 static av_cold int update_fontsize(AVFilterContext *ctx, int index)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     unsigned int fontsize = s->default_fontsize;
     int err;
     double size, roundedsize;
@@ -955,7 +937,7 @@ static av_cold int update_fontsize(AVFilterContext *ctx, int index)
 
 static int load_font_file(AVFilterContext *ctx, const char *path, int index, int text_index)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     int err;
 
     err = FT_New_Face(s->library, path, index, &s->face[text_index]);
@@ -972,7 +954,7 @@ static int load_font_file(AVFilterContext *ctx, const char *path, int index, int
 #if CONFIG_LIBFONTCONFIG
 static int load_font_fontconfig(AVFilterContext *ctx, int text_index)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     FcConfig *fontconfig;
     FcPattern *pat, *best;
     FcResult result = FcResultMatch;
@@ -1055,7 +1037,7 @@ fail:
 
 static int load_font(AVFilterContext *ctx, int index)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     int err;
 
     /* load the face, and set up the encoding, which is by default UTF-8 */
@@ -1074,7 +1056,7 @@ static int load_font(AVFilterContext *ctx, int index)
 
 static int load_textfile(AVFilterContext *ctx)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     int err;
     uint8_t *textbuf;
     uint8_t *tmp;
@@ -1107,7 +1089,7 @@ static inline int is_newline(uint32_t c)
 #if CONFIG_LIBFRIBIDI
 static int shape_text(AVFilterContext *ctx)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     uint8_t *tmp;
     int ret = AVERROR(ENOMEM);
     static const FriBidiFlags flags = FRIBIDI_FLAGS_DEFAULT |
@@ -1192,10 +1174,124 @@ out:
 }
 #endif
 
+static int query_formats(AVFilterContext *ctx)
+{
+    static const enum AVPixelFormat pix_fmts[] =
+    {AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE};
+    AVFilterFormats *formats;
+
+    formats = ff_make_format_list(pix_fmts);
+
+    if (!formats)
+        return AVERROR(ENOMEM);
+
+    return ff_set_common_formats(ctx, formats);
+}
+
+#if IS_FFMPEG_342_AND_ABOVE
+static int config_output(AVFilterLink *outlink)
+#else
+static int config_output(AVFilterLink *outlink, AVFrame *in)
+#endif
+{
+    AVFilterContext *ctx = outlink->src;
+    AVFilterLink *inlink = ctx->inputs[0];
+    NetIntDrawTextContext *s   = ctx->priv;
+
+    AVHWFramesContext *in_frames_ctx;
+    AVHWFramesContext *out_frames_ctx;
+    int ni_pix_fmt;
+
+    av_log(ctx, AV_LOG_DEBUG, "%s inlink wxh %dx%d\n", __func__,
+           inlink->w, inlink->h);
+
+    outlink->w = inlink->w;
+    outlink->h = inlink->h;
+
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
+    if (ctx->inputs[0]->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
+#else
+    if (in->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
+#endif
+
+    av_log(ctx, AV_LOG_INFO, "vf_drawtext_ni.c %s in_frames_ctx->sw_format: %d "
+           "%s\n", __func__, in_frames_ctx->sw_format,
+           av_get_pix_fmt_name(in_frames_ctx->sw_format));
+    if ((ni_pix_fmt = ff_to_ni_pix_fmt(in_frames_ctx->sw_format)) < 0) {
+        return AVERROR(EINVAL);
+    }
+
+
+    s->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
+    if (!s->out_frames_ref)
+        return AVERROR(ENOMEM);
+
+    out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
+    out_frames_ctx->format            = AV_PIX_FMT_NI_QUAD;
+    out_frames_ctx->width             = outlink->w;
+    out_frames_ctx->height            = outlink->h;
+    out_frames_ctx->sw_format         = in_frames_ctx->sw_format;
+    out_frames_ctx->initial_pool_size = NI_DRAWTEXT_ID;
+
+    av_hwframe_ctx_init(s->out_frames_ref);
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(ctx->outputs[0]);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+
+    //The upload will be per frame if frame rate is not specified/determined
+    if (li->frame_rate.den)
+        s->framerate = (li->frame_rate.num + li->frame_rate.den - 1) / li->frame_rate.den;
+#else
+    av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
+    ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!ctx->outputs[0]->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+
+    //The upload will be per frame if frame rate is not specified/determined
+    if (inlink->frame_rate.den)
+        s->framerate = (inlink->frame_rate.num + inlink->frame_rate.den - 1) / inlink->frame_rate.den;
+#endif
+
+    if (s->framerate == 0)
+        s->framerate = 1;
+    av_log(ctx, AV_LOG_INFO, "overlay frame upload frequency %d\n", s->framerate);
+
+    return 0;
+}
+
+static int glyph_enu_free(void *opaque, void *elem)
+{
+    Glyph *glyph = elem;
+
+    FT_Done_Glyph(glyph->glyph);
+    FT_Done_Glyph(glyph->border_glyph);
+    av_free(elem);
+    return 0;
+}
+
+
 static av_cold int init(AVFilterContext *ctx)
 {
     int i, err;
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     Glyph *glyph;
 
     for (i = 0; i < s->text_num; i++) {
@@ -1314,110 +1410,9 @@ static av_cold int init(AVFilterContext *ctx)
     return 0;
 }
 
-static int query_formats(AVFilterContext *ctx)
-{
-    static const enum AVPixelFormat pix_fmts[] =
-    {AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE};
-    AVFilterFormats *formats;
-
-    formats = ff_make_format_list(pix_fmts);
-
-    if (!formats)
-        return AVERROR(ENOMEM);
-
-    return ff_set_common_formats(ctx, formats);
-}
-
-#if IS_FFMPEG_342_AND_ABOVE
-static int config_output(AVFilterLink *outlink)
-#else
-static int config_output(AVFilterLink *outlink, AVFrame *in)
-#endif
-{
-    AVFilterContext *ctx = outlink->src;
-    AVFilterLink *inlink = ctx->inputs[0];
-    NIDrawTextContext *s   = ctx->priv;
-
-    AVHWFramesContext *in_frames_ctx;
-    AVHWFramesContext *out_frames_ctx;
-    int ni_pix_fmt;
-
-    av_log(ctx, AV_LOG_DEBUG, "%s inlink wxh %dx%d\n", __func__,
-           inlink->w, inlink->h);
-
-    outlink->w = inlink->w;
-    outlink->h = inlink->h;
-
-#if IS_FFMPEG_71_AND_ABOVE
-    FilterLink *li = ff_filter_link(inlink);
-    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
-#elif IS_FFMPEG_342_AND_ABOVE
-    in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
-#else
-    in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
-#endif
-
-    av_log(ctx, AV_LOG_INFO, "vf_drawtext_ni.c %s in_frames_ctx->sw_format: %d "
-           "%s\n", __func__, in_frames_ctx->sw_format,
-           av_get_pix_fmt_name(in_frames_ctx->sw_format));
-    if ((ni_pix_fmt = ff_to_ni_pix_fmt(in_frames_ctx->sw_format)) < 0) {
-        return AVERROR(EINVAL);
-    }
-
-
-    s->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
-    if (!s->out_frames_ref)
-        return AVERROR(ENOMEM);
-
-    out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
-    out_frames_ctx->format            = AV_PIX_FMT_NI_QUAD;
-    out_frames_ctx->width             = outlink->w;
-    out_frames_ctx->height            = outlink->h;
-    out_frames_ctx->sw_format         = in_frames_ctx->sw_format;
-    out_frames_ctx->initial_pool_size = NI_DRAWTEXT_ID;
-
-    av_hwframe_ctx_init(s->out_frames_ref);
-#if IS_FFMPEG_71_AND_ABOVE
-    FilterLink *lo = ff_filter_link(ctx->outputs[0]);
-    av_buffer_unref(&lo->hw_frames_ctx);
-    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-    if (!lo->hw_frames_ctx)
-        return AVERROR(ENOMEM);
-
-    //The upload will be per frame if frame rate is not specified/determined
-    if(li->frame_rate.den)
-        s->framerate = (li->frame_rate.num + li->frame_rate.den - 1) / li->frame_rate.den;
-#else
-    av_buffer_unref(&ctx->outputs[0]->hw_frames_ctx);
-    ctx->outputs[0]->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-    if (!ctx->outputs[0]->hw_frames_ctx)
-        return AVERROR(ENOMEM);
-
-    //The upload will be per frame if frame rate is not specified/determined
-    if(inlink->frame_rate.den)
-        s->framerate = (inlink->frame_rate.num + inlink->frame_rate.den - 1) / inlink->frame_rate.den;
-#endif
-
-    if(s->framerate == 0)
-        s->framerate = 1;
-    av_log(ctx, AV_LOG_INFO, "overlay frame upload frequency %d\n", s->framerate);
-
-    return 0;
-}
-
-static int glyph_enu_free(void *opaque, void *elem)
-{
-    Glyph *glyph = elem;
-
-    FT_Done_Glyph(glyph->glyph);
-    FT_Done_Glyph(glyph->border_glyph);
-    av_free(elem);
-    return 0;
-}
-
 static av_cold void uninit(AVFilterContext *ctx)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     int i;
     // NI HW frame related uninit
     av_frame_free(&s->keep_overlay);
@@ -1485,7 +1480,7 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
 #endif
 {
     AVFilterContext *ctx = inlink->dst;
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     char *expr;
     int i, ret, flags;
     AVHWFramesContext *in_frames_ctx;
@@ -1613,16 +1608,16 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
 #if IS_FFMPEG_43_AND_ABOVE
 static int command(AVFilterContext *ctx, const char *cmd, const char *arg, char *res, int res_len, int flags)
 {
-    NIDrawTextContext *old = ctx->priv;
-    NIDrawTextContext *new = NULL;
+    NetIntDrawTextContext *old = ctx->priv;
+    NetIntDrawTextContext *new = NULL;
     int ret;
 
     if (!strcmp(cmd, "reinit")) {
-        new = av_mallocz(sizeof(NIDrawTextContext));
+        new = av_mallocz(sizeof(NetIntDrawTextContext));
         if (!new)
             return AVERROR(ENOMEM);
 
-        new->class = &nidrawtext_class;
+        new->class = &ni_drawtext_class;
         ret = av_opt_copy(new, old);
         if (ret < 0)
             goto fail;
@@ -1654,8 +1649,9 @@ static int command(AVFilterContext *ctx, const char *cmd, const char *arg, char 
 
         ctx->priv = new;
         return config_input(ctx->inputs[0]);
-    } else
+    } else {
         return AVERROR(ENOSYS);
+    }
 
 fail:
     av_log(ctx, AV_LOG_ERROR, "Failed to process command. Continuing with existing parameters.\n");
@@ -1667,7 +1663,7 @@ fail:
 static int func_pict_type(AVFilterContext *ctx, AVBPrint *bp,
                           char *fct, unsigned argc, char **argv, int tag)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
 
     av_bprintf(bp, "%c", av_get_picture_type_char(s->var_values[VAR_PICT_TYPE]));
     return 0;
@@ -1676,7 +1672,7 @@ static int func_pict_type(AVFilterContext *ctx, AVBPrint *bp,
 static int func_pts(AVFilterContext *ctx, AVBPrint *bp,
                     char *fct, unsigned argc, char **argv, int tag)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     const char *fmt;
     double pts = s->var_values[VAR_T];
     int ret;
@@ -1736,7 +1732,7 @@ static int func_pts(AVFilterContext *ctx, AVBPrint *bp,
 static int func_frame_num(AVFilterContext *ctx, AVBPrint *bp,
                           char *fct, unsigned argc, char **argv, int tag)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
 
     av_bprintf(bp, "%d", (int)s->var_values[VAR_N]);
     return 0;
@@ -1745,7 +1741,7 @@ static int func_frame_num(AVFilterContext *ctx, AVBPrint *bp,
 static int func_metadata(AVFilterContext *ctx, AVBPrint *bp,
                          char *fct, unsigned argc, char **argv, int tag)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     AVDictionaryEntry *e = av_dict_get(s->metadata, argv[0], NULL, 0);
 
     if (e && e->value)
@@ -1774,7 +1770,7 @@ static int func_strftime(AVFilterContext *ctx, AVBPrint *bp,
 static int func_eval_expr(AVFilterContext *ctx, AVBPrint *bp,
                           char *fct, unsigned argc, char **argv, int tag)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     double res;
     int ret;
 
@@ -1794,7 +1790,7 @@ static int func_eval_expr(AVFilterContext *ctx, AVBPrint *bp,
 static int func_eval_expr_int_format(AVFilterContext *ctx, AVBPrint *bp,
                           char *fct, unsigned argc, char **argv, int tag)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     double res;
     int intval;
     int ret;
@@ -1962,7 +1958,7 @@ static int expand_text(AVFilterContext *ctx, char *text, AVBPrint *bp)
     return 0;
 }
 
-static int draw_glyphs(NIDrawTextContext *s, ni_frame_t *frame,
+static int draw_glyphs(NetIntDrawTextContext *s, ni_frame_t *frame,
                        int width, int height,
                        FFDrawColor *color,
                        int x, int y, int borderw, int index)
@@ -2016,14 +2012,14 @@ continue_on_invalid:
 }
 
 
-static void update_color_with_alpha(NIDrawTextContext *s, FFDrawColor *color, const FFDrawColor incolor)
+static void update_color_with_alpha(NetIntDrawTextContext *s, FFDrawColor *color, const FFDrawColor incolor)
 {
     *color = incolor;
     color->rgba[3] = (color->rgba[3] * s->alpha) / 255;
     ff_draw_color(&s->dc, color, color->rgba);
 }
 
-static void update_alpha(NIDrawTextContext *s)
+static void update_alpha(NetIntDrawTextContext *s)
 {
     double alpha = av_expr_eval(s->a_pexpr, s->var_values, &s->prng);
 
@@ -2038,7 +2034,7 @@ static void update_alpha(NIDrawTextContext *s)
         s->alpha = 256 * alpha;
 }
 
-static void update_canvas_size(NIDrawTextContext *s, int x, int y, int w, int h)
+static void update_canvas_size(NetIntDrawTextContext *s, int x, int y, int w, int h)
 {
     if (s->x_start == 0 && s->x_end == -1 &&
         s->y_start == 0 && s->y_end == -1) {
@@ -2083,13 +2079,13 @@ static void update_watermark_internal(ni_scaler_watermark_params_t *multi_waterm
 
 static void update_signal_watermark(int x0, int y0, int w0, int h0,
                                    int x1, int y1, int w1, int h1,
-                                   NIDrawTextContext *s, int index)
+                                   NetIntDrawTextContext *s, int index)
 {
     int inter_x_start = FFMAX(x0, x1);
     int inter_y_start = FFMAX(y0, y1);
     int inter_x_end = FFMIN(x0 + w0, x1 + w1);
     int inter_y_end = FFMIN(y0 + h0, y1 + h1);
-    if(inter_x_start >= inter_x_end || inter_y_start >= inter_y_end) {
+    if (inter_x_start >= inter_x_end || inter_y_start >= inter_y_end) {
         return;
     } else {
         av_log(s, AV_LOG_DEBUG, "index %d, x0 %d y0 %d w0 %d h0 %d\n", index,
@@ -2102,7 +2098,7 @@ static void update_signal_watermark(int x0, int y0, int w0, int h0,
     }
 }
 
-static void update_watermark(NIDrawTextContext *s, int x, int y, int w, int h)
+static void update_watermark(NetIntDrawTextContext *s, int x, int y, int w, int h)
 {
     int frame_width = s->watermark_width0 + s->watermark_width1;
     int frame_height = (s->watermark_height0 * 2) + s->watermark_height1;
@@ -2123,8 +2119,7 @@ static void update_watermark(NIDrawTextContext *s, int x, int y, int w, int h)
         h = frame_height - y;
     }
 
-    for(int watermark_idx = 0; watermark_idx < NI_MAX_SUPPORT_WATERMARK_NUM; watermark_idx++)
-    {
+    for (int watermark_idx = 0; watermark_idx < NI_MAX_SUPPORT_WATERMARK_NUM; watermark_idx++) {
         update_signal_watermark(x, y, w, h,
                                 s->watermark_width0 * (watermark_idx % 2),
                                 s->watermark_height0 * (watermark_idx / 2),
@@ -2134,25 +2129,25 @@ static void update_watermark(NIDrawTextContext *s, int x, int y, int w, int h)
     }
 }
 
-static void check_and_expand_canvas_size(NIDrawTextContext *s, int min_filter_width, int min_filter_heigth)
+static void check_and_expand_canvas_size(NetIntDrawTextContext *s, int min_filter_width, int min_filter_heigth)
 {
     int x_distance = s->x_end - s->x_start;
     int y_distance = s->y_end - s->y_start;
 
-    if(x_distance < min_filter_width){
-        if(s->x_start - 0 >= min_filter_width - x_distance){
+    if (x_distance < min_filter_width) {
+        if (s->x_start - 0 >= min_filter_width - x_distance) {
             s->x_start -= min_filter_width - x_distance;
         }
-        else{
+        else {
             s->x_end += min_filter_width - x_distance;
         }
     }
 
-    if(y_distance < min_filter_heigth){
-        if(s->y_start - 0 >= min_filter_heigth - y_distance){
+    if (y_distance < min_filter_heigth) {
+        if (s->y_start - 0 >= min_filter_heigth - y_distance) {
             s->y_start -= min_filter_heigth - y_distance;
         }
-        else{
+        else {
             s->y_end += min_filter_heigth - y_distance;
         }
     }
@@ -2161,7 +2156,7 @@ static void check_and_expand_canvas_size(NIDrawTextContext *s, int min_filter_wi
 static int draw_text(AVFilterContext *ctx, ni_frame_t *frame,
                      int width, int height, int64_t pts)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     AVFilterLink *inlink = ctx->inputs[0];
 
     uint32_t code = 0, prev_code = 0;
@@ -2190,7 +2185,7 @@ static int draw_text(AVFilterContext *ctx, ni_frame_t *frame,
 
     av_bprint_clear(bp);
 
-    if(s->basetime != AV_NOPTS_VALUE)
+    if (s->basetime != AV_NOPTS_VALUE)
         now = pts * av_q2d(ctx->inputs[0]->time_base) + s->basetime/1000000;
 
     s->upload_drawtext_frame = 0;
@@ -2209,13 +2204,10 @@ static int draw_text(AVFilterContext *ctx, ni_frame_t *frame,
             av_bprint_strftime(bp, s->text[i], &ltime);
             break;
         }
-        if(s->text_last_updated[i] == NULL)
-        {
+        if (s->text_last_updated[i] == NULL) {
             s->upload_drawtext_frame = 1;
-        }
-        else
-        {
-            if(strcmp(s->text_last_updated[i], bp->str))
+        } else {
+            if (strcmp(s->text_last_updated[i], bp->str))
                 s->upload_drawtext_frame = 1;
         }
         s->text_last_updated[i] = av_realloc(s->text_last_updated[i], bp->len+1);
@@ -2240,7 +2232,7 @@ static int draw_text(AVFilterContext *ctx, ni_frame_t *frame,
         text = s->expanded_text.str;
         if ((len = s->expanded_text.len) > s->nb_positions) {
             if (!(s->positions =
-                  av_realloc(s->positions, len*sizeof(*s->positions))))
+                av_realloc(s->positions, len*sizeof(*s->positions))))
                 return AVERROR(ENOMEM);
             s->nb_positions = len;
         }
@@ -2332,8 +2324,10 @@ continue_on_invalid2:
             /* save position */
             s->positions[j].x = x + glyph->bitmap_left;
             s->positions[j].y = y - glyph->bitmap_top + y_max;
-            if (code == '\t') x  = (x / s->tabsize[i] + 1)*s->tabsize[i];
-            else              x += glyph->advance;
+            if (code == '\t')
+                x  = (x / s->tabsize[i] + 1)*s->tabsize[i];
+            else
+                x += glyph->advance;
         }
 
         max_text_line_w = FFMAX(x, max_text_line_w);
@@ -2408,8 +2402,7 @@ continue_on_invalid2:
             if (s->y[i] + box_h + offsetbottom > height)
                 s->y[i] = FFMAX(height - box_h - offsetbottom, 0);
         }
-        if(s->x[i] != s->x_bak[i] || s->y[i] != s->y_bak[i])
-        {
+        if (s->x[i] != s->x_bak[i] || s->y[i] != s->y_bak[i]) {
             s->x_bak[i] = s->x[i];
             s->y_bak[i] = s->y[i];
             s->upload_drawtext_frame = 1;
@@ -2444,7 +2437,7 @@ continue_on_invalid2:
     return 0;
 }
 
-static int init_hwframe_uploader(AVFilterContext *ctx, NIDrawTextContext *s,
+static int init_hwframe_uploader(AVFilterContext *ctx, NetIntDrawTextContext *s,
                                  AVFrame *frame, int txt_w, int txt_h)
 {
     int ret;
@@ -2532,7 +2525,7 @@ static int init_hwframe_uploader(AVFilterContext *ctx, NIDrawTextContext *s,
 
     ni_cpy_hwframe_ctx(main_frame_ctx, out_frames_ctx);
     ni_device_session_copy(&s->api_ctx, &f_hwctx_output->api_ctx);
-#if IS_FFMPEG_70_AND_ABOVE
+#if IS_FFMPEG_61_AND_ABOVE
     s->buffer_limit = 1;
 #endif
     if (s->use_watermark) {
@@ -2596,7 +2589,7 @@ static int init_hwframe_uploader(AVFilterContext *ctx, NIDrawTextContext *s,
 static int ni_drawtext_config_input(AVFilterContext *ctx, AVFrame *frame,
                                     int txt_w, int txt_h)
 {
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     int ret;
 
 #if IS_FFMPEG_342_AND_ABOVE
@@ -2626,7 +2619,7 @@ static int overlay_intersects_background(
     int overlay_height,
     const AVFrame *main)
 {
-    const NIDrawTextContext *s = (NIDrawTextContext *)ctx->priv;
+    const NetIntDrawTextContext *s = (NetIntDrawTextContext *)ctx->priv;
 
     if (s->x_start >= main->width)
         return 0;
@@ -2673,14 +2666,13 @@ static void calculate_dst_rectangle(
     }
 }
 
-static void init_watermark(NIDrawTextContext *s, int width, int height)
+static void init_watermark(NetIntDrawTextContext *s, int width, int height)
 {
     s->watermark_width0 = width / 2;
     s->watermark_width1 = width - s->watermark_width0;
     s->watermark_height0 = height / 3;
     s->watermark_height1 = height - (2 * s->watermark_height0);
-    for(int watermark_idx = 0; watermark_idx < NI_MAX_SUPPORT_WATERMARK_NUM; watermark_idx++)
-    {
+    for (int watermark_idx = 0; watermark_idx < NI_MAX_SUPPORT_WATERMARK_NUM; watermark_idx++) {
         s->scaler_watermark_paras.multi_watermark_params[watermark_idx].ui32StartX = 0;
         s->scaler_watermark_paras.multi_watermark_params[watermark_idx].ui32StartY = 0;
         s->scaler_watermark_paras.multi_watermark_params[watermark_idx].ui32Width = 0;
@@ -2723,9 +2715,8 @@ static void calculate_src_rectangle(
 static int do_intermediate_crop_and_overlay(
     AVFilterContext *ctx,
     AVFrame *overlay,
-    AVFrame *frame)
-{
-    NIDrawTextContext *s = (NIDrawTextContext *)ctx->priv;
+    AVFrame *frame) {
+    NetIntDrawTextContext *s = (NetIntDrawTextContext *)ctx->priv;
     AVHWFramesContext    *main_frame_ctx;
     niFrameSurface1_t    *frame_surface;
     ni_retcode_t          retcode;
@@ -2901,7 +2892,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
 {
     AVFilterContext *ctx = inlink->dst;
     AVFilterLink *outlink = ctx->outputs[0];
-    NIDrawTextContext *s = ctx->priv;
+    NetIntDrawTextContext *s = ctx->priv;
     niFrameSurface1_t *logging_surface, *logging_surface_out;
     uint8_t *p_dst, *p_src;
     int y, txt_img_width, txt_img_height;
@@ -2961,15 +2952,17 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
         NAN : frame->pts * av_q2d(inlink->time_base);
 
     s->var_values[VAR_PICT_TYPE] = frame->pict_type;
-FF_DISABLE_DEPRECATION_WARNINGS // FFmpeg-n6.1+ deprecation for pkt_pos
+#if FF_API_FRAME_PKT
+FF_DISABLE_DEPRECATION_WARNINGS // FFmpeg-n6.1+ deprecates AVFrame->pkt_pos and AVFrame->pkt_size
     s->var_values[VAR_PKT_POS] = frame->pkt_pos;
+    s->var_values[VAR_PKT_SIZE] = frame->pkt_size;
 FF_ENABLE_DEPRECATION_WARNINGS
+#endif
 #if LIBAVUTIL_VERSION_MAJOR >= 59 //7.0
     s->var_values[VAR_PKT_DURATION] = frame->duration * av_q2d(inlink->time_base);
 #else
     s->var_values[VAR_PKT_DURATION] = frame->pkt_duration * av_q2d(inlink->time_base);
 #endif
-    s->var_values[VAR_PKT_SIZE] = frame->pkt_size;
     s->metadata = frame->metadata;
     s->x_start = 0;
     s->x_end = -1;
@@ -3023,8 +3016,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #else
         int frame_count = inlink->frame_count;
 #endif
-        for(int watermark_idx = 0; watermark_idx < NI_MAX_SUPPORT_WATERMARK_NUM; watermark_idx++)
-        {
+        for (int watermark_idx = 0; watermark_idx < NI_MAX_SUPPORT_WATERMARK_NUM; watermark_idx++) {
             if (s->scaler_watermark_paras.multi_watermark_params[watermark_idx].ui32Valid) {
                 av_log(ctx, AV_LOG_DEBUG, "frame %d index %d, x %d, y %d, w %d, h %d\n",
                     frame_count, watermark_idx,
@@ -3040,8 +3032,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #else
     if (!s->ni_config_initialized) {
 #endif
-        if(s->initiated_upload_width == 0)
-        {
+        if (s->initiated_upload_width == 0) {
             s->initiated_upload_width = frame->width > ovly_width ? ovly_width + 4 : frame->width;
             s->initiated_upload_height = frame->height > ovly_height ? ovly_height + 4 : frame->height;
         }
@@ -3063,8 +3054,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
     }
 
     if (s->use_watermark) {
-        if(ni_scaler_set_watermark_params(&s->api_ctx,
-                                          &s->scaler_watermark_paras.multi_watermark_params[0])) {
+        if (ni_scaler_set_watermark_params(&s->api_ctx,
+                                           &s->scaler_watermark_paras.multi_watermark_params[0])) {
             av_log(ctx, AV_LOG_ERROR, "failed ni_drawtext set_watermark_params\n");
             goto fail;
         }
@@ -3134,14 +3125,12 @@ FF_ENABLE_DEPRECATION_WARNINGS
         s->upload_drawtext_frame = 1;
 
     s->filtered_frame_count++;
-    if(s->filtered_frame_count  == s->framerate || s->keep_overlay == NULL)
-    {
+    if (s->filtered_frame_count  == s->framerate || s->keep_overlay == NULL) {
         s->upload_drawtext_frame = 1;
         s->filtered_frame_count = 0;
     }
 
-    if(s->upload_drawtext_frame)
-    {
+    if (s->upload_drawtext_frame) {
         av_frame_free(&s->keep_overlay);
         s->keep_overlay = NULL;
         s->keep_overlay = overlay = av_frame_alloc();
@@ -3175,8 +3164,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
             return ret;
         }
     }
-    else
-    {
+    else {
         overlay = s->keep_overlay;
     }
     // logging
@@ -3421,8 +3409,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
         // av_hwframe_get_buffer(s->hw_frames_ctx, out, 0);
         out->data[3] = av_malloc(sizeof(niFrameSurface1_t));
 
-        if (!out->data[3])
-        {
+        if (!out->data[3]) {
             av_frame_free(&out);
             return AVERROR(ENOMEM);
         }
@@ -3489,24 +3476,19 @@ static int activate(AVFilterContext *ctx)
     AVFilterLink  *outlink = ctx->outputs[0];
     AVFrame *frame = NULL;
     int ret = 0;
-    NIDrawTextContext *s = inlink->dst->priv;
+    NetIntDrawTextContext *s = inlink->dst->priv;
 
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
-    if (ff_inlink_check_available_frame(inlink))
-    {
-        if (s->initialized)
-        {
+    if (ff_inlink_check_available_frame(inlink)) {
+        if (s->initialized) {
             ret = ni_device_session_query_buffer_avail(&s->api_ctx, NI_DEVICE_TYPE_SCALER);
         }
 
-        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
-        {
+        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION) {
             av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
-        }
-        else if (ret < 0)
-        {
+        } else if (ret < 0) {
             av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %lu available_frame %d outlink framequeue %lu frame_wanted %d - return NOT READY\n",
                 __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
             return FFERROR_NOT_READY;
@@ -3516,7 +3498,11 @@ static int activate(AVFilterContext *ctx)
         if (ret < 0)
             return ret;
 
-        return filter_frame(inlink, frame);
+        ret = filter_frame(inlink, frame);
+        if (ret >= 0) {
+            ff_filter_set_ready(ctx, 300);
+        }
+        return ret;
     }
 
     // We did not get a frame from input link, check its status
@@ -3529,7 +3515,7 @@ static int activate(AVFilterContext *ctx)
 }
 #endif
 
-static const AVFilterPad avfilter_vf_drawtext_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
         .name           = "default",
         .type           = AVMEDIA_TYPE_VIDEO,
@@ -3543,10 +3529,10 @@ static const AVFilterPad avfilter_vf_drawtext_inputs[] = {
 #endif
 };
 
-static const AVFilterPad avfilter_vf_drawtext_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
+        .name         = "default",
+        .type         = AVMEDIA_TYPE_VIDEO,
 #if IS_FFMPEG_342_AND_ABOVE
         .config_props = config_output,
 #endif
@@ -3557,30 +3543,30 @@ static const AVFilterPad avfilter_vf_drawtext_outputs[] = {
 };
 
 AVFilter ff_vf_drawtext_ni_quadra = {
-    .name          = "ni_quadra_drawtext",
-    .description   = NULL_IF_CONFIG_SMALL("NETINT Quadra draw text on top of video frames using libfreetype library v" NI_XCODER_REVISION),
-    .priv_size     = sizeof(NIDrawTextContext),
-    .priv_class    = &nidrawtext_class,
-    .init          = init,
-    .uninit        = uninit,
+    .name            = "ni_quadra_drawtext",
+    .description     = NULL_IF_CONFIG_SMALL("NETINT Quadra draw text on top of video frames using libfreetype library v" NI_XCODER_REVISION),
+    .priv_size       = sizeof(NetIntDrawTextContext),
+    .priv_class      = &ni_drawtext_class,
+    .init            = init,
+    .uninit          = uninit,
 #if IS_FFMPEG_61_AND_ABOVE
-    .activate      = activate,
+    .activate        = activate,
 #endif
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
     FILTER_QUERY_FUNC(query_formats),
-    FILTER_INPUTS(avfilter_vf_drawtext_inputs),
-    FILTER_OUTPUTS(avfilter_vf_drawtext_outputs),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
 #else
-    .query_formats = query_formats,
-    .inputs        = avfilter_vf_drawtext_inputs,
-    .outputs       = avfilter_vf_drawtext_outputs,
+    .query_formats   = query_formats,
+    .inputs          = inputs,
+    .outputs         = outputs,
 #endif
 #if IS_FFMPEG_43_AND_ABOVE
     .process_command = command,
 #endif
-    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
+    .flags           = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
     // only FFmpeg 3.4.2 and above have .flags_internal
 #if IS_FFMPEG_342_AND_ABOVE
-    .flags_internal= FF_FILTER_FLAG_HWFRAME_AWARE
+    .flags_internal  = FF_FILTER_FLAG_HWFRAME_AWARE
 #endif
 };

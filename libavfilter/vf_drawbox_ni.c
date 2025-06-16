@@ -100,7 +100,6 @@ enum var_name {
 
 typedef struct NetIntDrawBoxContext {
     const AVClass *class;
-    AVDictionary *opts;
 
     /**
      * New dimensions. Special values are:
@@ -132,6 +131,7 @@ typedef struct NetIntDrawBoxContext {
     int initialized;
     int session_opened;
     int keep_alive_timeout; /* keep alive timeout setting */
+    int inplace;
     bool is_p2p;
     int buffer_limit;
 
@@ -143,15 +143,17 @@ AVFilter ff_vf_drawbox_ni;
 
 static const int NUM_EXPR_EVALS = 4;
 
-#if (LIBAVFILTER_VERSION_MAJOR > 9 || (LIBAVFILTER_VERSION_MAJOR == 9 && LIBAVFILTER_VERSION_MINOR >= 3))
 static av_cold int init(AVFilterContext *ctx)
-#else
-static av_cold int init_dict(AVFilterContext *ctx, AVDictionary **opts)
-#endif
 {
     NetIntDrawBoxContext *drawbox = ctx->priv;
 
     uint8_t rgba_color[4];
+
+    // Check for incompatible options
+    if (drawbox->inplace && drawbox->is_p2p) {
+        av_log(ctx, AV_LOG_ERROR, "Cannot use 'inplace' and 'is_p2p' options together\n");
+        return AVERROR(EINVAL);
+    }
 
     if (av_parse_color(rgba_color, drawbox->box_color_str[0], -1, ctx) < 0)
         return AVERROR(EINVAL);
@@ -160,12 +162,6 @@ static av_cold int init_dict(AVFilterContext *ctx, AVDictionary **opts)
     drawbox->box_rgba_color[0][G] = rgba_color[1];
     drawbox->box_rgba_color[0][B] = rgba_color[2];
     drawbox->box_rgba_color[0][A] = rgba_color[3];
-
-#if (LIBAVFILTER_VERSION_MAJOR > 9 || (LIBAVFILTER_VERSION_MAJOR == 9 && LIBAVFILTER_VERSION_MINOR >= 3))
-#else
-    drawbox->opts = *opts;
-    *opts = NULL;
-#endif
 
     return 0;
 }
@@ -178,7 +174,6 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
 {
     AVFilterContext *ctx = inlink->dst;
     NetIntDrawBoxContext *s = ctx->priv;
-    AVHWFramesContext *in_frames_ctx;
     double var_values[VARS_NB], res;
     char *expr;
     int ret;
@@ -243,27 +238,12 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
     }
-    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
 #elif IS_FFMPEG_342_AND_ABOVE
     if (ctx->inputs[0]->hw_frames_ctx == NULL) {
         av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
         return AVERROR(EINVAL);
     }
-    in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
-#else
-    in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
 #endif
-    switch(in_frames_ctx->sw_format)
-    {
-        case AV_PIX_FMT_ARGB:
-        case AV_PIX_FMT_RGBA:
-        case AV_PIX_FMT_ABGR:
-        case AV_PIX_FMT_BGRA:
-            break;
-        default:
-            av_log(ctx, AV_LOG_ERROR, "format %s not supported\n", av_get_pix_fmt_name(in_frames_ctx->sw_format));
-            return AVERROR(EINVAL);
-    }
 
     return 0;
 
@@ -272,24 +252,6 @@ fail:
            "Error when evaluating the expression '%s'.\n",
            expr);
     return ret;
-}
-
-static av_cold void uninit(AVFilterContext *ctx)
-{
-    NetIntDrawBoxContext *drawbox = ctx->priv;
-
-    av_dict_free(&drawbox->opts);
-
-    if (drawbox->api_dst_frame.data.frame.p_buffer)
-        ni_frame_buffer_free(&drawbox->api_dst_frame.data.frame);
-
-    if (drawbox->session_opened) {
-        /* Close operation will free the device frames */
-        ni_device_session_close(&drawbox->api_ctx, 1, NI_DEVICE_TYPE_SCALER);
-        ni_device_session_context_clear(&drawbox->api_ctx);
-    }
-
-    av_buffer_unref(&drawbox->out_frames_ref);
 }
 
 static int query_formats(AVFilterContext *ctx)
@@ -304,6 +266,22 @@ static int query_formats(AVFilterContext *ctx)
         return AVERROR(ENOMEM);
 
     return ff_set_common_formats(ctx, formats);
+}
+
+static av_cold void uninit(AVFilterContext *ctx)
+{
+    NetIntDrawBoxContext *drawbox = ctx->priv;
+
+    if (drawbox->api_dst_frame.data.frame.p_buffer)
+        ni_frame_buffer_free(&drawbox->api_dst_frame.data.frame);
+
+    if (drawbox->session_opened) {
+        /* Close operation will free the device frames */
+        ni_device_session_close(&drawbox->api_ctx, 1, NI_DEVICE_TYPE_SCALER);
+        ni_device_session_context_clear(&drawbox->api_ctx);
+    }
+
+    av_buffer_unref(&drawbox->out_frames_ref);
 }
 
 static int init_out_pool(AVFilterContext *ctx)
@@ -366,24 +344,25 @@ static int config_props(AVFilterLink *outlink, AVFrame *in)
 
 #if IS_FFMPEG_71_AND_ABOVE
     FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
     in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
 #elif IS_FFMPEG_342_AND_ABOVE
+    if (ctx->inputs[0]->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
     in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
 #else
+    if (in->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
     in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
 #endif
 
-    switch(in_frames_ctx->sw_format)
-    {
-        case AV_PIX_FMT_ARGB:
-        case AV_PIX_FMT_RGBA:
-        case AV_PIX_FMT_ABGR:
-        case AV_PIX_FMT_BGRA:
-            break;
-        default:
-            av_log(ctx, AV_LOG_ERROR, "format %s not supported\n", av_get_pix_fmt_name(in_frames_ctx->sw_format));
-            return AVERROR(EINVAL);
-    }
     /* Set the output format */
     drawbox->out_format = in_frames_ctx->sw_format;
 
@@ -392,10 +371,12 @@ static int config_props(AVFilterLink *outlink, AVFrame *in)
     outlink->w = FFALIGN(w, (1 << h_shift));
     outlink->h = FFALIGN(h, (1 << v_shift));
 
-    if (inlink0->sample_aspect_ratio.num){
+    if (inlink0->sample_aspect_ratio.num) {
         outlink->sample_aspect_ratio = av_mul_q((AVRational){outlink->h * inlink0->w, outlink->w * inlink0->h}, inlink0->sample_aspect_ratio);
-    } else
+    } else {
         outlink->sample_aspect_ratio = inlink0->sample_aspect_ratio;
+
+    }
 
     av_log(ctx, AV_LOG_VERBOSE,
            "w:%d h:%d fmt:%s sar:%d/%d -> w:%d h:%d fmt:%s sar:%d/%d\n",
@@ -447,16 +428,18 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
     AVFilterLink *outlink = link->dst->outputs[0];
     AVFrame *out = NULL;
     niFrameSurface1_t* frame_surface,*new_frame_surface;
-    AVHWFramesContext *pAVHFWCtx;
+    AVHWFramesContext *pAVHFWCtx,*out_frames_ctx;
     AVNIDeviceContext *pAVNIDevCtx;
+    AVNIFramesContext *out_ni_ctx;
     ni_retcode_t retcode;
-    int drawboxr_format, cardno;
+    int drawbox_format, cardno;
     uint16_t tempFID;
     double var_values[VARS_NB], res;
     char *expr;
     int ret;
     int i;
     uint32_t box_count = 0;
+    const AVPixFmtDescriptor *desc;
 
     frame_surface = (niFrameSurface1_t *) in->data[3];
     if (frame_surface == NULL) {
@@ -484,15 +467,6 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
         }
 #endif
 
-        if (!(pAVHFWCtx->sw_format == AV_PIX_FMT_ARGB || \
-            pAVHFWCtx->sw_format == AV_PIX_FMT_RGBA || \
-            pAVHFWCtx->sw_format == AV_PIX_FMT_ABGR || \
-            pAVHFWCtx->sw_format == AV_PIX_FMT_BGRA))
-        {
-            av_log(link->dst, AV_LOG_ERROR, "format %s not supported\n", av_get_pix_fmt_name(pAVHFWCtx->sw_format));
-            retcode = AVERROR(EINVAL);
-            goto fail;
-        }
         retcode = ni_device_session_context_init(&drawbox->api_ctx);
         if (retcode < 0) {
             av_log(link->dst, AV_LOG_ERROR,
@@ -535,19 +509,20 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
 
         retcode = init_out_pool(link->dst);
 
-        if (retcode < 0)
-        {
+        if (retcode < 0) {
             av_log(link->dst, AV_LOG_ERROR,
                    "Internal output allocation failed rc = %d\n", retcode);
             goto fail;
         }
 
-        AVHWFramesContext *out_frames_ctx = (AVHWFramesContext *)drawbox->out_frames_ref->data;
-        AVNIFramesContext *out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
+        out_frames_ctx = (AVHWFramesContext *)drawbox->out_frames_ref->data;
+        out_ni_ctx = (AVNIFramesContext *)out_frames_ctx->hwctx;
         ni_cpy_hwframe_ctx(pAVHFWCtx, out_frames_ctx);
         ni_device_session_copy(&drawbox->api_ctx, &out_ni_ctx->api_ctx);
 
-        if (in->color_range == AVCOL_RANGE_JPEG) {
+        desc = av_pix_fmt_desc_get(pAVHFWCtx->sw_format);
+
+        if ((in->color_range == AVCOL_RANGE_JPEG) && !(desc->flags & AV_PIX_FMT_FLAG_RGB)) {
             av_log(link->dst, AV_LOG_WARNING,
                    "WARNING: Full color range input, limited color range output\n");
         }
@@ -555,15 +530,14 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
         drawbox->initialized = 1;
     }
 
-    drawboxr_format = ff_ni_ffmpeg_to_gc620_pix_fmt(pAVHFWCtx->sw_format);
+    drawbox_format = ff_ni_ffmpeg_to_gc620_pix_fmt(pAVHFWCtx->sw_format);
 
     retcode = ni_frame_buffer_alloc_hwenc(&drawbox->api_dst_frame.data.frame,
                                           outlink->w,
                                           outlink->h,
                                           0);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         retcode = AVERROR(ENOMEM);
         goto fail;
     }
@@ -619,14 +593,13 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
             i, drawbox->box_x[i], drawbox->box_y[i], drawbox->box_w[i], drawbox->box_h[i], \
             drawbox->box_rgba_color[i][0] + (drawbox->box_rgba_color[i][1] << 8) + (drawbox->box_rgba_color[i][2] << 16) + (drawbox->box_rgba_color[i][3] << 24));
 
-        if((drawbox->box_w[i] > 0) && (drawbox->box_h[i] > 0))
-        {
+        if ((drawbox->box_w[i] > 0) && (drawbox->box_h[i] > 0)) {
             drawbox->scaler_drawbox_paras.multi_drawbox_params[box_count].start_x = drawbox->box_x[i];
             drawbox->scaler_drawbox_paras.multi_drawbox_params[box_count].start_y = drawbox->box_y[i];
             drawbox->scaler_drawbox_paras.multi_drawbox_params[box_count].end_x = drawbox->box_x[i] + drawbox->box_w[i] - 1;
             drawbox->scaler_drawbox_paras.multi_drawbox_params[box_count].end_y = drawbox->box_y[i] + drawbox->box_h[i] - 1;
             drawbox->scaler_drawbox_paras.multi_drawbox_params[box_count].rgba_c = drawbox->box_rgba_color[0][B] + (drawbox->box_rgba_color[0][G] << 8) + (drawbox->box_rgba_color[0][R] << 16) + (drawbox->box_rgba_color[0][A] << 24);
-            if((drawbox->box_w[i] > 0) && (drawbox->box_h[i] > 0))
+            if ((drawbox->box_w[i] > 0) && (drawbox->box_h[i] > 0))
                 box_count++;
         }
     }
@@ -637,15 +610,14 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
 
     retcode = ni_scaler_set_drawbox_params(&drawbox->api_ctx,
                     &drawbox->scaler_drawbox_paras.multi_drawbox_params[0]);
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         retcode = AVERROR(ENOMEM);
         goto fail;
     }
 
     drawbox->frame_in.picture_width  = FFALIGN(in->width, 2);
     drawbox->frame_in.picture_height = FFALIGN(in->height, 2);
-    drawbox->frame_in.picture_format = drawboxr_format;
+    drawbox->frame_in.picture_format = drawbox_format;
     drawbox->frame_in.session_id     = frame_surface->ui16session_ID;
     drawbox->frame_in.output_index   = frame_surface->output_idx;
     drawbox->frame_in.frame_index    = frame_surface->ui16FrameIdx;
@@ -662,26 +634,26 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
         goto fail;
     }
 
-    drawboxr_format = ff_ni_ffmpeg_to_gc620_pix_fmt(drawbox->out_format);
+    drawbox_format = ff_ni_ffmpeg_to_gc620_pix_fmt(drawbox->out_format);
 
     drawbox->frame_out.picture_width  = outlink->w;
     drawbox->frame_out.picture_height = outlink->h;
-    drawbox->frame_out.picture_format = drawboxr_format;
+    drawbox->frame_out.picture_format = drawbox_format;
 
     /* Allocate hardware device destination frame. This acquires a frame
      * from the pool
      */
-    retcode = ni_device_alloc_frame(&drawbox->api_ctx,        //
-                                    FFALIGN(outlink->w, 2), //
-                                    FFALIGN(outlink->h, 2), //
-                                    drawboxr_format,          //
-                                    NI_SCALER_FLAG_IO,      //
-                                    0,                      //
-                                    0,                      //
-                                    0,                      //
-                                    0,                      //
-                                    0,                      //
-                                    -1,                     //
+    retcode = ni_device_alloc_frame(&drawbox->api_ctx,
+                                    FFALIGN(outlink->w, 2),
+                                    FFALIGN(outlink->h, 2),
+                                    drawbox_format,
+                                    NI_SCALER_FLAG_IO,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    drawbox->inplace ? frame_surface->ui16FrameIdx : -1,
                                     NI_DEVICE_TYPE_SCALER);
 
     if (retcode != NI_RETCODE_SUCCESS) {
@@ -691,9 +663,34 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
         goto fail;
     }
 
+    /* Set the new frame index */
+    retcode = ni_device_session_read_hwdesc(&drawbox->api_ctx, &drawbox->api_dst_frame,
+                                            NI_DEVICE_TYPE_SCALER);
+
+    if (retcode != NI_RETCODE_SUCCESS) {
+        av_log(link->dst, AV_LOG_ERROR,
+               "Can't acquire output frame %d\n",retcode);
+        retcode = AVERROR(ENOMEM);
+        goto fail;
+    }
+
+#ifdef NI_MEASURE_LATENCY
+    ff_ni_update_benchmark("ni_quadra_drawbox");
+#endif
+
+    /*
+     * For an in-place drawbox, we have modified the input
+     * frame so just pass it along to the downstream.
+     */
+    if (drawbox->inplace) {
+        av_log(link->dst, AV_LOG_DEBUG,
+               "vf_drawbox_ni.c:IN trace ui16FrameIdx = [%d] --> out [%d] \n",
+               frame_surface->ui16FrameIdx, frame_surface->ui16FrameIdx);
+        return ff_filter_frame(link->dst->outputs[0], in);
+    }
+
     out = av_frame_alloc();
-    if (!out)
-    {
+    if (!out) {
         retcode = AVERROR(ENOMEM);
         goto fail;
     }
@@ -713,29 +710,13 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
 
     out->data[3] = av_malloc(sizeof(niFrameSurface1_t));
 
-    if (!out->data[3])
-    {
+    if (!out->data[3]) {
         retcode = AVERROR(ENOMEM);
         goto fail;
     }
 
     /* Copy the frame surface from the incoming frame */
     memcpy(out->data[3], in->data[3], sizeof(niFrameSurface1_t));
-
-    /* Set the new frame index */
-    retcode = ni_device_session_read_hwdesc(&drawbox->api_ctx, &drawbox->api_dst_frame,
-                                            NI_DEVICE_TYPE_SCALER);
-
-    if (retcode != NI_RETCODE_SUCCESS) {
-        av_log(link->dst, AV_LOG_ERROR,
-               "Can't acquire output frame %d\n",retcode);
-        retcode = AVERROR(ENOMEM);
-        goto fail;
-    }
-
-#ifdef NI_MEASURE_LATENCY
-    ff_ni_update_benchmark("ni_quadra_drawbox");
-#endif
 
     tempFID = frame_surface->ui16FrameIdx;
     frame_surface = (niFrameSurface1_t *)out->data[3];
@@ -774,6 +755,40 @@ fail:
     return retcode;
 }
 
+static int process_command(AVFilterContext *ctx, const char *cmd, const char *args, char *res, int res_len, int flags)
+{
+    AVFilterLink *inlink = ctx->inputs[0];
+    NetIntDrawBoxContext *s = ctx->priv;
+    int old_x = s->box_x[0];
+    int old_y = s->box_y[0];
+    int old_w = s->box_w[0];
+    int old_h = s->box_h[0];
+    char *old_color = av_strdup(s->box_color_str[0]);
+    int ret;
+
+    ret = ff_filter_process_command(ctx, cmd, args, res, res_len, flags);
+    if (ret < 0) {
+        av_log(ctx, AV_LOG_ERROR, "Bad command/arguments (%d)\n", ret);
+        return ret;
+    }
+
+    ret = init(ctx);
+    if (ret < 0)
+        goto end;
+    ret = config_input(inlink);
+end:
+    if (ret < 0) {
+        s->box_x[0] = old_x;
+        s->box_y[0] = old_y;
+        s->box_w[0] = old_w;
+        s->box_h[0] = old_h;
+        memcpy(s->box_color_str[0], old_color, strlen(old_color));
+    }
+
+    av_free(old_color);
+    return ret;
+}
+
 #if IS_FFMPEG_61_AND_ABOVE
 static int activate(AVFilterContext *ctx)
 {
@@ -786,20 +801,15 @@ static int activate(AVFilterContext *ctx)
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
-    if (ff_inlink_check_available_frame(inlink))
-    {
-        if (s->initialized)
-        {
+    if (ff_inlink_check_available_frame(inlink)) {
+        if (s->initialized && !s->inplace) {
             ret = ni_device_session_query_buffer_avail(&s->api_ctx, NI_DEVICE_TYPE_SCALER);
         }
 
-        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
-        {
+        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION) {
             av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
-        }
-        else if (ret < 0)
-        {
-            av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %u available_frame %d outlink framequeue %u frame_wanted %d - return NOT READY\n",
+        } else if (ret < 0) {
+            av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %lu available_frame %d outlink framequeue %lu frame_wanted %d - return NOT READY\n",
                 __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
             return FFERROR_NOT_READY;
         }
@@ -808,7 +818,11 @@ static int activate(AVFilterContext *ctx)
         if (ret < 0)
             return ret;
 
-        return filter_frame(inlink, frame);
+        ret = filter_frame(inlink, frame);
+        if (ret >= 0) {
+            ff_filter_set_ready(ctx, 300);
+        }
+        return ret;
     }
 
     // We did not get a frame from input link, check its status
@@ -823,56 +837,44 @@ static int activate(AVFilterContext *ctx)
 
 #define OFFSET(x) offsetof(NetIntDrawBoxContext, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_FILTERING_PARAM)
+#define RFLAGS (FLAGS | AV_OPT_FLAG_RUNTIME_PARAM)
 
-static const AVOption drawbox_options[] = {
-    { "x",         "set horizontal position of the left box edge", OFFSET(box_x_expr[0]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "y",         "set vertical position of the top box edge",    OFFSET(box_y_expr[0]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "width",     "set width of the box",                         OFFSET(box_w_expr[0]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "w",         "set width of the box",                         OFFSET(box_w_expr[0]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "height",    "set height of the box",                        OFFSET(box_h_expr[0]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "h",         "set height of the box",                        OFFSET(box_h_expr[0]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "color",     "set color of the box",                         OFFSET(box_color_str[0]), AV_OPT_TYPE_STRING, { .str = "black" }, 0, 0, FLAGS },
-    { "c",         "set color of the box",                         OFFSET(box_color_str[0]), AV_OPT_TYPE_STRING, { .str = "black" }, 0, 0, FLAGS },
-    { "x1",         "",                                            OFFSET(box_x_expr[1]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "y1",         "",                                            OFFSET(box_y_expr[1]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "w1",         "",                                            OFFSET(box_w_expr[1]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "h1",         "",                                            OFFSET(box_h_expr[1]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "x2",         "",                                            OFFSET(box_x_expr[2]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "y2",         "",                                            OFFSET(box_y_expr[2]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "w2",         "",                                            OFFSET(box_w_expr[2]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "h2",         "",                                            OFFSET(box_h_expr[2]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "x3",         "",                                            OFFSET(box_x_expr[3]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "y3",         "",                                            OFFSET(box_y_expr[3]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "w3",         "",                                            OFFSET(box_w_expr[3]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "h3",         "",                                            OFFSET(box_h_expr[3]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "x4",         "",                                            OFFSET(box_x_expr[4]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "y4",         "",                                            OFFSET(box_y_expr[4]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "w4",         "",                                            OFFSET(box_w_expr[4]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "h4",         "",                                            OFFSET(box_h_expr[4]),    AV_OPT_TYPE_STRING, { .str="0" },       0, 0, FLAGS },
-    { "filterblit", "filterblit enable", OFFSET(params.filterblit), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS },
-    { "is_p2p", "enable p2p transfer", OFFSET(is_p2p), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS },
-    { "buffer_limit", "Whether to limit output buffering count, 0: no, 1: yes", OFFSET(buffer_limit), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS },
-    { "keep_alive_timeout",
-      "Specify a custom session keep alive timeout in seconds.",
-      OFFSET(keep_alive_timeout),
-      AV_OPT_TYPE_INT,
-      {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT},
-      NI_MIN_KEEP_ALIVE_TIMEOUT,
-      NI_MAX_KEEP_ALIVE_TIMEOUT,
-      FLAGS,
-      "keep_alive_timeout" },
+static const AVOption ni_drawbox_options[] = {
+    { "x",         "set horizontal position of the left box edge", OFFSET(box_x_expr[0]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "y",         "set vertical position of the top box edge",    OFFSET(box_y_expr[0]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "width",     "set width of the box",                         OFFSET(box_w_expr[0]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "w",         "set width of the box",                         OFFSET(box_w_expr[0]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "height",    "set height of the box",                        OFFSET(box_h_expr[0]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "h",         "set height of the box",                        OFFSET(box_h_expr[0]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "color",     "set color of the box",                         OFFSET(box_color_str[0]),  AV_OPT_TYPE_STRING, {.str="black"}, 0, 0, RFLAGS },
+    { "c",         "set color of the box",                         OFFSET(box_color_str[0]),  AV_OPT_TYPE_STRING, {.str="black"}, 0, 0, RFLAGS },
+    { "x1",         "",                                            OFFSET(box_x_expr[1]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "y1",         "",                                            OFFSET(box_y_expr[1]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "w1",         "",                                            OFFSET(box_w_expr[1]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "h1",         "",                                            OFFSET(box_h_expr[1]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "x2",         "",                                            OFFSET(box_x_expr[2]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "y2",         "",                                            OFFSET(box_y_expr[2]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "w2",         "",                                            OFFSET(box_w_expr[2]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "h2",         "",                                            OFFSET(box_h_expr[2]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "x3",         "",                                            OFFSET(box_x_expr[3]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "y3",         "",                                            OFFSET(box_y_expr[3]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "w3",         "",                                            OFFSET(box_w_expr[3]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "h3",         "",                                            OFFSET(box_h_expr[3]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "x4",         "",                                            OFFSET(box_x_expr[4]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "y4",         "",                                            OFFSET(box_y_expr[4]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "w4",         "",                                            OFFSET(box_w_expr[4]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "h4",         "",                                            OFFSET(box_h_expr[4]),     AV_OPT_TYPE_STRING, {.str="0"},     0, 0, RFLAGS },
+    { "filterblit", "filterblit enable",                           OFFSET(params.filterblit), AV_OPT_TYPE_BOOL,   {.i64=0},       0, 1, FLAGS },
+    { "inplace",    "draw boxes in-place",                         OFFSET(inplace),           AV_OPT_TYPE_BOOL,   {.i64=0},       0, 1, FLAGS },
+    NI_FILT_OPTION_IS_P2P,
+    NI_FILT_OPTION_KEEPALIVE,
+    NI_FILT_OPTION_BUFFER_LIMIT,
     { NULL }
 };
 
-static const AVClass drawbox_class = {
-    .class_name       = "ni_drawbox",
-    .item_name        = av_default_item_name,
-    .option           = drawbox_options,
-    .version          = LIBAVUTIL_VERSION_INT,
-    .category         = AV_CLASS_CATEGORY_FILTER,
-};
+AVFILTER_DEFINE_CLASS(ni_drawbox);
 
-static const AVFilterPad avfilter_vf_drawbox_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
@@ -887,7 +889,7 @@ static const AVFilterPad avfilter_vf_drawbox_inputs[] = {
 #endif
 };
 
-static const AVFilterPad avfilter_vf_drawbox_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
@@ -904,18 +906,14 @@ static const AVFilterPad avfilter_vf_drawbox_outputs[] = {
 AVFilter ff_vf_drawbox_ni_quadra = {
     .name            = "ni_quadra_drawbox",
     .description     = NULL_IF_CONFIG_SMALL("NETINT Quadra video drawbox v" NI_XCODER_REVISION),
-#if (LIBAVFILTER_VERSION_MAJOR > 9 || (LIBAVFILTER_VERSION_MAJOR == 9 && LIBAVFILTER_VERSION_MINOR >= 3))
     .init            = init,
-#else
-    .init_dict       = init_dict,
-#endif
     .uninit          = uninit,
 #if IS_FFMPEG_61_AND_ABOVE
     .activate      = activate,
 #endif
 
     .priv_size       = sizeof(NetIntDrawBoxContext),
-    .priv_class      = &drawbox_class,
+    .priv_class      = &ni_drawbox_class,
 
     // FFmpeg 3.4.2 and above only
 #if IS_FFMPEG_342_AND_ABOVE
@@ -923,12 +921,13 @@ AVFilter ff_vf_drawbox_ni_quadra = {
 #endif
 
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
-    FILTER_INPUTS(avfilter_vf_drawbox_inputs),
-    FILTER_OUTPUTS(avfilter_vf_drawbox_outputs),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
     FILTER_QUERY_FUNC(query_formats),
 #else
-    .inputs          = avfilter_vf_drawbox_inputs,
-    .outputs         = avfilter_vf_drawbox_outputs,
+    .inputs          = inputs,
+    .outputs         = outputs,
     .query_formats   = query_formats,
 #endif
+    .process_command = process_command,
 };

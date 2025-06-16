@@ -258,11 +258,11 @@ ff_av1_rawtotile_bsf = {
 #if (LIBAVCODEC_VERSION_MAJOR > 59 || LIBAVCODEC_VERSION_MAJOR >= 59 && LIBAVCODEC_VERSION_MINOR >= 37)
     .p.name         = "av1_rawtotile",
     .p.codec_ids    = av1_rawtotile_codec_ids,
-	.p.priv_class   = &av1_rawtotile_class,
+    .p.priv_class   = &av1_rawtotile_class,
 #else
     .name           = "av1_rawtotile",
     .codec_ids      = av1_rawtotile_codec_ids,
-	.priv_class     = &av1_rawtotile_class,
+    .priv_class     = &av1_rawtotile_class,
 #endif
     .priv_data_size = sizeof(AV1FtoTileContext),
     .init           = av1_rawtotile_init,

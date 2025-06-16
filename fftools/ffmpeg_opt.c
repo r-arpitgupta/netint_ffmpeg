@@ -1630,7 +1630,7 @@ const OptionDef options[] = {
     { "dts_error_threshold",    OPT_TYPE_FLOAT, OPT_EXPERT,
         { &dts_error_threshold },
         "timestamp error delta threshold", "threshold" },
-    { "ni_interval_fps",        OPT_TYPE_FLOAT, OPT_EXPERT,           
+    { "ni_interval_fps",        OPT_TYPE_FLOAT, OPT_EXPERT,
         { &ni_interval_fps }, // NETINT: add option to display windowed average FPS
         "window size and reporting interval for moving average processing FPS calculation", "number" },
     { "xerror",                 OPT_TYPE_BOOL, OPT_EXPERT,

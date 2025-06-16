@@ -176,14 +176,7 @@ enum AVFrameSideDataType {
      * uuid_iso_iec_11578 followed by AVFrameSideData.size - 16 bytes of user_data_payload_byte.
      */
     AV_FRAME_DATA_SEI_UNREGISTERED,
-
-    // NETINT: User data unregistered SEI data
-    /**
-     * This side data takes SEI payload type USER_DATA_UNREGISTERED.
-     * There will be no byte reordering.
-     * Usually this payload would be: 16B UUID + other payload Bytes.
-     */
-    AV_FRAME_DATA_NETINT_UDU_SEI,
+    AV_FRAME_DATA_NETINT_UDU_SEI = AV_FRAME_DATA_SEI_UNREGISTERED, //  NETINT: legacy naming
 
     // NETINT: Custom SEI data
     /**
@@ -281,7 +274,7 @@ enum AVFrameSideDataType {
     // NETINT: Collection of ni general side data
     /**
      * This side data is a general side data, the supported types are as follows
-     * NI_FRAME_AUX_DATA_CRF, NI_FRAME_AUX_DATA_CRF_FLOAT, 
+     * NI_FRAME_AUX_DATA_CRF, NI_FRAME_AUX_DATA_CRF_FLOAT,
      * NI_FRAME_AUX_DATA_VBV_MAX_RATE, NI_FRAME_AUX_DATA_VBV_BUFFER_SIZE
     */
     AV_FRAME_DATA_NETINT_GENERAL_SIDE_DATA,
@@ -456,8 +449,8 @@ typedef struct AVNetintLongTermRef {
 /**
  * NETINT: Structure describing general side data.
  * supported reconfig types in ni_aux_data_type_t:
- * 
- * NI_FRAME_AUX_DATA_CRF, NI_FRAME_AUX_DATA_CRF_FLOAT, 
+ *
+ * NI_FRAME_AUX_DATA_CRF, NI_FRAME_AUX_DATA_CRF_FLOAT,
  * NI_FRAME_AUX_DATA_VBV_MAX_RATE, NI_FRAME_AUX_DATA_VBV_BUFFER_SIZE
  *
  */

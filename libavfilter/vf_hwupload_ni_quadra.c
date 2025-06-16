@@ -30,7 +30,7 @@
 #endif
 #include "video.h"
 
-typedef struct NiUploadContext {
+typedef struct NetIntUploadContext {
     const AVClass *class;
     int device_idx;
     const char *device_name;
@@ -40,45 +40,11 @@ typedef struct NiUploadContext {
     AVBufferRef *hwdevice;
     AVBufferRef *hwframe;
     int keep_alive_timeout; /* keep alive timeout setting */
-} NiUploadContext;
+} NetIntUploadContext;
 
-static av_cold int niupload_init(AVFilterContext *ctx)
+static int query_formats(AVFilterContext *ctx)
 {
-    NiUploadContext *s = ctx->priv;
-    char buf[64] = { 0 };
-
-    snprintf(buf, sizeof(buf), "%d", s->device_idx);
-
-    if(s->device_name)
-    {
-        int tmp_guid_id;
-        tmp_guid_id = ni_rsrc_get_device_by_block_name(s->device_name, NI_DEVICE_TYPE_UPLOAD);
-        if (tmp_guid_id != NI_RETCODE_FAILURE)
-        {
-           av_log(ctx, AV_LOG_VERBOSE,"User set uploader device_name=%s. This will replace uploader_device_id\n",s->device_name);
-           memset(buf, 0, sizeof(buf));
-           snprintf(buf, sizeof(buf), "%d", tmp_guid_id);
-        } 
-        else
-        {
-           av_log(ctx, AV_LOG_VERBOSE, "Uploader device_name=%s not found. Use default value of uploader device_num=%d instead.\n",s->device_name,s->device_idx);
-        }
-    }
-
-    return av_hwdevice_ctx_create(&s->hwdevice, AV_HWDEVICE_TYPE_NI_QUADRA, buf, NULL, 0);
-}
-
-static av_cold void niupload_uninit(AVFilterContext *ctx)
-{
-    NiUploadContext *s = ctx->priv;
-
-    av_buffer_unref(&s->hwframe);
-    av_buffer_unref(&s->hwdevice);
-}
-
-static int niupload_query_formats(AVFilterContext *ctx)
-{
-    NiUploadContext *nictx = ctx->priv;
+    NetIntUploadContext *nictx = ctx->priv;
     AVHWFramesConstraints *constraints = NULL;
     const enum AVPixelFormat *input_pix_fmts, *output_pix_fmts;
     AVFilterFormats *input_formats = NULL;
@@ -130,15 +96,46 @@ fail:
     return err;
 }
 
+static av_cold int init(AVFilterContext *ctx)
+{
+    NetIntUploadContext *s = ctx->priv;
+    char buf[64] = { 0 };
+
+    snprintf(buf, sizeof(buf), "%d", s->device_idx);
+
+    if (s->device_name) {
+        int tmp_guid_id;
+        tmp_guid_id = ni_rsrc_get_device_by_block_name(s->device_name, NI_DEVICE_TYPE_UPLOAD);
+        if (tmp_guid_id != NI_RETCODE_FAILURE) {
+            av_log(ctx, AV_LOG_VERBOSE,"User set uploader device_name=%s. This will replace uploader_device_id\n",s->device_name);
+            memset(buf, 0, sizeof(buf));
+            snprintf(buf, sizeof(buf), "%d", tmp_guid_id);
+        }
+        else {
+            av_log(ctx, AV_LOG_VERBOSE, "Uploader device_name=%s not found. Use default value of uploader device_num=%d instead.\n",s->device_name,s->device_idx);
+        }
+    }
+
+    return av_hwdevice_ctx_create(&s->hwdevice, AV_HWDEVICE_TYPE_NI_QUADRA, buf, NULL, 0);
+}
+
+static av_cold void uninit(AVFilterContext *ctx)
+{
+    NetIntUploadContext *s = ctx->priv;
+
+    av_buffer_unref(&s->hwframe);
+    av_buffer_unref(&s->hwdevice);
+}
+
 #if IS_FFMPEG_342_AND_ABOVE
-static int niupload_config_output(AVFilterLink *outlink)
+static int config_output(AVFilterLink *outlink)
 #else
-static int niupload_config_output(AVFilterLink *outlink, AVFrame *in)
+static int config_output(AVFilterLink *outlink, AVFrame *in)
 #endif
 {
     AVFilterContext *ctx = outlink->src;
     AVFilterLink *inlink = ctx->inputs[0];
-    NiUploadContext *s = ctx->priv;
+    NetIntUploadContext *s = ctx->priv;
     AVNIFramesContext *pub_ctx;
     AVHWFramesContext *hwframe_ctx;
     int ret;
@@ -189,7 +186,7 @@ static int niupload_config_output(AVFilterLink *outlink, AVFrame *in)
     pub_ctx->keep_alive_timeout = s->keep_alive_timeout;
 #if IS_FFMPEG_71_AND_ABOVE
     FilterLink *li = ff_filter_link(inlink);
-     pub_ctx->framerate     = li->frame_rate;
+    pub_ctx->framerate     = li->frame_rate;
 #else
     pub_ctx->framerate     = inlink->frame_rate;
 #endif
@@ -212,17 +209,17 @@ static int niupload_config_output(AVFilterLink *outlink, AVFrame *in)
     return 0;
 }
 
-static int niupload_filter_frame(AVFilterLink *link, AVFrame *in)
+static int filter_frame(AVFilterLink *link, AVFrame *in)
 {
     AVFilterContext   *ctx = link->dst;
     AVFilterLink  *outlink = ctx->outputs[0];
     AVFrame *out = NULL;
     int ret;
 #if !IS_FFMPEG_342_AND_ABOVE
-    NiUploadContext *s     = ctx->priv;
+    NetIntUploadContext *s     = ctx->priv;
 
     if (!s->initialized) {
-        niupload_config_output(outlink, in);
+        config_output(outlink, in);
         s->initialized = 1;
     }
 #endif
@@ -291,19 +288,14 @@ static int activate(AVFilterContext *ctx)
 
     av_log(ctx, AV_LOG_TRACE, "%s: ready %u inlink framequeue %u available_frame %d outlink framequeue %u frame_wanted %d\n",
         __func__, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
-    
-    if (ff_inlink_check_available_frame(inlink))
-    {
-        if (inlink->format != outlink->format)
-        {
+
+    if (ff_inlink_check_available_frame(inlink)) {
+        if (inlink->format != outlink->format) {
             ret = ni_device_session_query_buffer_avail(&f_hwctx->api_ctx, NI_DEVICE_TYPE_UPLOAD);
 
-            if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
-            {
+            if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION) {
                 av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
-            }
-            else if (ret < 0)
-            {
+            } else if (ret < 0) {
                 av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %u available_frame %d outlink framequeue %u frame_wanted %d - return NOT READY\n",
                        __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
                 return FFERROR_NOT_READY;
@@ -313,73 +305,53 @@ static int activate(AVFilterContext *ctx)
         ret = ff_inlink_consume_frame(inlink, &frame);
         if (ret < 0)
             return ret;
- 
-        return niupload_filter_frame(inlink, frame);
+
+        ret = filter_frame(inlink, frame);
+        if (ret >= 0) {
+            ff_filter_set_ready(ctx, 300);
+        }
+        return ret;
     }
-    
+
     // We did not get a frame from input link, check its status
     FF_FILTER_FORWARD_STATUS(inlink, outlink);
 
     // We have no frames yet from input link and no EOF, so request some.
     FF_FILTER_FORWARD_WANTED(outlink, inlink);
-    
+
     return FFERROR_NOT_READY;
 }
 #endif
 
-#define OFFSET(x) offsetof(NiUploadContext, x)
+#define OFFSET(x) offsetof(NetIntUploadContext, x)
 #define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 // default device_idx -1 for uploader to auto balance
-static const AVOption niupload_options[] = {
-    {"device",
-     "Number of the device to use",
-     OFFSET(device_idx),
-     AV_OPT_TYPE_INT,
-     {.i64 = -1},
-     -1,
-     INT_MAX,
-     FLAGS},
-
-    {"devname",
-     "Name of the device to use",
-     OFFSET(device_name),
-     AV_OPT_TYPE_STRING,
-     {.str = NULL},
-     CHAR_MIN,
-     CHAR_MAX,
-     FLAGS},
-
-    {"keep_alive_timeout",
-     "Specify a custom session keep alive timeout in seconds.",
-     OFFSET(keep_alive_timeout),
-     AV_OPT_TYPE_INT,
-     {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT},
-     NI_MIN_KEEP_ALIVE_TIMEOUT,
-     NI_MAX_KEEP_ALIVE_TIMEOUT,
-     FLAGS,
-     "keep_alive_timeout"},
-    {NULL},
+static const AVOption ni_upload_options[] = {
+    { "device",  "Number of the device to use", OFFSET(device_idx),  AV_OPT_TYPE_INT,    {.i64 = -1},  -1,        INT_MAX,  FLAGS},
+    { "devname", "Name of the device to use",   OFFSET(device_name), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
+    NI_FILT_OPTION_KEEPALIVE,
+    { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(niupload);
+AVFILTER_DEFINE_CLASS(ni_upload);
 
-static const AVFilterPad niupload_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = niupload_filter_frame,
+        .filter_frame = filter_frame,
     },
 #if (LIBAVFILTER_VERSION_MAJOR < 8)
     { NULL }
 #endif
 };
 
-static const AVFilterPad niupload_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
 #if IS_FFMPEG_342_AND_ABOVE
-        .config_props = niupload_config_output,
+        .config_props = config_output,
 #endif
     },
 #if (LIBAVFILTER_VERSION_MAJOR < 8)
@@ -388,27 +360,27 @@ static const AVFilterPad niupload_outputs[] = {
 };
 
 AVFilter ff_vf_hwupload_ni_quadra = {
-    .name        = "ni_quadra_hwupload",
-    .description = NULL_IF_CONFIG_SMALL("NETINT Quadra upload a system memory frame to a device v" NI_XCODER_REVISION),
+    .name           = "ni_quadra_hwupload",
+    .description    = NULL_IF_CONFIG_SMALL("NETINT Quadra upload a system memory frame to a device v" NI_XCODER_REVISION),
 
-    .init      = niupload_init,
-    .uninit    = niupload_uninit,
+    .init           = init,
+    .uninit         = uninit,
 #if IS_FFMPEG_61_AND_ABOVE
-    .activate      = activate,
+    .activate       = activate,
 #endif
-    .priv_size  = sizeof(NiUploadContext),
-    .priv_class = &niupload_class,
+    .priv_size      = sizeof(NetIntUploadContext),
+    .priv_class     = &ni_upload_class,
 // only FFmpeg 3.4.2 and above have .flags_internal
 #if IS_FFMPEG_342_AND_ABOVE
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 #endif
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
-    FILTER_INPUTS(niupload_inputs),
-    FILTER_OUTPUTS(niupload_outputs),
-    FILTER_QUERY_FUNC(niupload_query_formats),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
+    FILTER_QUERY_FUNC(query_formats),
 #else
-    .inputs        = niupload_inputs,
-    .outputs       = niupload_outputs,
-    .query_formats = niupload_query_formats,
+    .inputs         = inputs,
+    .outputs        = outputs,
+    .query_formats  = query_formats,
 #endif
 };

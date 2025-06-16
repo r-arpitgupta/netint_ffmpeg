@@ -121,6 +121,22 @@ static int query_formats(AVFilterContext *ctx)
     return ff_set_common_formats(ctx, formats);
 }
 
+static av_cold void uninit(AVFilterContext *ctx)
+{
+    NetIntPadContext *s = ctx->priv;
+
+    if (s->api_dst_frame.data.frame.p_buffer)
+        ni_frame_buffer_free(&s->api_dst_frame.data.frame);
+
+    if (s->session_opened) {
+        /* Close operation will free the device frames */
+        ni_device_session_close(&s->api_ctx, 1, NI_DEVICE_TYPE_SCALER);
+        ni_device_session_context_clear(&s->api_ctx);
+    }
+
+    av_buffer_unref(&s->out_frames_ref);
+}
+
 static int init_out_pool(AVFilterContext *ctx)
 {
     NetIntPadContext  *s = ctx->priv;
@@ -158,28 +174,28 @@ static int config_input(AVFilterLink *inlink, AVFrame *in)
     int ret;
     double var_values[VARS_NB], res;
     char *expr;
+    AVHWFramesContext *avhwctx;
 
-    if (inlink->format == AV_PIX_FMT_NI_QUAD)
-    {
+    if (inlink->format == AV_PIX_FMT_NI_QUAD) {
 #if IS_FFMPEG_71_AND_ABOVE
         FilterLink *li = ff_filter_link(inlink);
-        AVBufferRef *avhwref = (AVBufferRef *)li->hw_frames_ctx;
-#elif IS_FFMPEG_342_AND_ABOVE
-        AVBufferRef *avhwref = (AVBufferRef *)inlink->hw_frames_ctx;
-#else
-        AVBufferRef *avhwref = (AVBufferRef *)in->hw_frames_ctx;
-#endif
-        if (avhwref == NULL) {
+        if (li->hw_frames_ctx == NULL) {
             av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
             return AVERROR(EINVAL);
         }
-        AVHWFramesContext *avhwctx = (AVHWFramesContext *)  avhwref->data;
-
+        avhwctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
+        if (inlink->hw_frames_ctx == NULL) {
+            av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+            return AVERROR(EINVAL);
+        }
+        avhwctx = (AVHWFramesContext *)inlink->hw_frames_ctx->data;
+#else
+        avhwctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
+#endif
         if (ff_draw_init(&s->draw, avhwctx->sw_format, 0) < 0)
             return AVERROR(EINVAL);
-    }
-    else
-    {
+    } else {
         if (ff_draw_init(&s->draw, inlink->format, 0) < 0)
             return AVERROR(EINVAL);
     }
@@ -320,10 +336,22 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
     ctx           = (AVFilterContext *)outlink->src;
 #if IS_FFMPEG_71_AND_ABOVE
     FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
     in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
 #elif IS_FFMPEG_342_AND_ABOVE
+    if (ctx->inputs[0]->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
     in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
 #else
+    if (in->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
     in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
 #endif
 
@@ -339,44 +367,39 @@ static int config_output(AVFilterLink *outlink, AVFrame *in)
         return AVERROR(EINVAL);
     }
 
-    if(s->auto_skip &&
-       !s->is_p2p && //the input and output are always on the same card, but filter with p2p always need to be executed
-       s->w == in_frames_ctx->width &&
-       s->h == in_frames_ctx->height &&
-       s->x == 0 &&
-       s->y == 0
-      )//skip the color range check
-    {
+    //skip the color range check
+    if (s->auto_skip &&
+        !s->is_p2p && //the input and output are always on the same card, but filter with p2p always need to be executed
+        s->w == in_frames_ctx->width &&
+        s->h == in_frames_ctx->height &&
+        s->x == 0 &&
+        s->y == 0
+       ) {
         //skip hardware pad
         s->skip_filter = 1;
 #if IS_FFMPEG_71_AND_ABOVE
         FilterLink *lt = ff_filter_link(outlink->src->inputs[0]);
-
         s->out_frames_ref = av_buffer_ref(lt->hw_frames_ctx);
-        if(!s->out_frames_ref)
-        {
+        if (!s->out_frames_ref) {
             return AVERROR(ENOMEM);
         }
         FilterLink *lo = ff_filter_link(outlink);
         av_buffer_unref(&lo->hw_frames_ctx);
         lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-        if(!lo->hw_frames_ctx)
-        {
+        if (!lo->hw_frames_ctx) {
             return AVERROR(ENOMEM);
         }
 #else
         AVFilterLink *inlink_for_skip = outlink->src->inputs[0];
 
         s->out_frames_ref = av_buffer_ref(inlink_for_skip->hw_frames_ctx);
-        if(!s->out_frames_ref)
-        {
+        if (!s->out_frames_ref) {
             return AVERROR(ENOMEM);
         }
 
         av_buffer_unref(&outlink->hw_frames_ctx);
         outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-        if(!outlink->hw_frames_ctx)
-        {
+        if (!outlink->hw_frames_ctx) {
             return AVERROR(ENOMEM);
         }
 #endif
@@ -438,9 +461,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     pAVNIDevCtx       = (AVNIDeviceContext *)pAVHFWCtx->device_ctx->hwctx;
     cardno            = ni_get_cardno(in);
 
-    if(s->skip_filter)
-    {//skip hardware pad
-
+    if (s->skip_filter) {
+         //skip hardware pad
         return ff_filter_frame(inlink->dst->outputs[0], in);
     }
 
@@ -491,8 +513,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
         retcode = init_out_pool(inlink->dst);
 
-        if (retcode < 0)
-        {
+        if (retcode < 0) {
             av_log(inlink->dst, AV_LOG_ERROR,
                    "Internal output allocation failed rc = %d\n", retcode);
             goto fail;
@@ -503,7 +524,9 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         ni_cpy_hwframe_ctx(pAVHFWCtx, out_frames_ctx);
         ni_device_session_copy(&s->api_ctx, &out_ni_ctx->api_ctx);
 
-        if (in->color_range == AVCOL_RANGE_JPEG) {
+        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pAVHFWCtx->sw_format);
+
+        if ((in->color_range == AVCOL_RANGE_JPEG) && !(desc->flags & AV_PIX_FMT_FLAG_RGB)) {
             av_log(inlink->dst, AV_LOG_WARNING,
                    "WARNING: Full color range input, limited color range output\n");
         }
@@ -518,8 +541,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                                           outlink->h,
                                           0);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         retcode = AVERROR(ENOMEM);
         goto fail;
     }
@@ -540,10 +562,10 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
      * Allocate device input frame. This call won't actually allocate a frame,
      * but sends the incoming hardware frame index to the scaler manager
      */
-    retcode = ni_device_alloc_frame(&s->api_ctx,            //
-                                    FFALIGN(in->width, 2),  //
-                                    FFALIGN(in->height, 2), //
-                                    scaler_format,          //
+    retcode = ni_device_alloc_frame(&s->api_ctx,
+                                    FFALIGN(in->width, 2),
+                                    FFALIGN(in->height, 2),
+                                    scaler_format,
                                     0,                      // input frame
                                     in->width,  // src rectangle width
                                     in->height, // src rectangle height
@@ -553,8 +575,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                                     frame_surface->ui16FrameIdx,
                                     NI_DEVICE_TYPE_SCALER);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         av_log(inlink->dst, AV_LOG_DEBUG, "Can't allocate device input frame %d\n", retcode);
         retcode = AVERROR(ENOMEM);
         goto fail;
@@ -578,8 +599,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                           -1,
                           NI_DEVICE_TYPE_SCALER);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         av_log(inlink->dst, AV_LOG_DEBUG,
                "Can't allocate device output frame %d\n", retcode);
         retcode = AVERROR(ENOMEM);
@@ -587,8 +607,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     }
 
     out = av_frame_alloc();
-    if (!out)
-    {
+    if (!out) {
         retcode = AVERROR(ENOMEM);
         goto fail;
     }
@@ -608,8 +627,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     out->data[3] = av_malloc(sizeof(niFrameSurface1_t));
 
-    if (!out->data[3])
-    {
+    if (!out->data[3]) {
         retcode = AVERROR(ENOMEM);
         goto fail;
     }
@@ -680,19 +698,14 @@ static int activate(AVFilterContext *ctx)
     // Forward the status on output link to input link, if the status is set, discard all queued frames
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
-    if (ff_inlink_check_available_frame(inlink))
-    {
-        if (s->initialized)
-        {
+    if (ff_inlink_check_available_frame(inlink)) {
+        if (s->initialized) {
             ret = ni_device_session_query_buffer_avail(&s->api_ctx, NI_DEVICE_TYPE_SCALER);
         }
 
-        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION)
-        {
+        if (ret == NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION) {
             av_log(ctx, AV_LOG_WARNING, "No backpressure support in FW\n");
-        }
-        else if (ret < 0)
-        {
+        } else if (ret < 0) {
             av_log(ctx, AV_LOG_WARNING, "%s: query ret %d, ready %u inlink framequeue %u available_frame %d outlink framequeue %u frame_wanted %d - return NOT READY\n",
                 __func__, ret, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_check_available_frame(inlink), ff_inlink_queued_frames(outlink), ff_outlink_frame_wanted(outlink));
             return FFERROR_NOT_READY;
@@ -702,7 +715,11 @@ static int activate(AVFilterContext *ctx)
         if (ret < 0)
             return ret;
 
-        return filter_frame(inlink, frame);
+        ret = filter_frame(inlink, frame);
+        if (ret >= 0) {
+            ff_filter_set_ready(ctx, 300);
+        }
+        return ret;
     }
 
     // We did not get a frame from input link, check its status
@@ -715,60 +732,28 @@ static int activate(AVFilterContext *ctx)
 }
 #endif
 
-static av_cold void uninit(AVFilterContext *ctx)
-{
-    NetIntPadContext *s = ctx->priv;
-
-    if (s->api_dst_frame.data.frame.p_buffer)
-        ni_frame_buffer_free(&s->api_dst_frame.data.frame);
-
-    if (s->session_opened) {
-        /* Close operation will free the device frames */
-        ni_device_session_close(&s->api_ctx, 1, NI_DEVICE_TYPE_SCALER);
-        ni_device_session_context_clear(&s->api_ctx);
-    }
-
-    av_buffer_unref(&s->out_frames_ref);
-}
-
-
 #define OFFSET(x) offsetof(NetIntPadContext, x)
 #define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 
-static const AVOption pad_options[] = {
-    { "width",  "set the pad area width expression",       OFFSET(w_expr), AV_OPT_TYPE_STRING, {.str = "iw"}, CHAR_MIN, CHAR_MAX, FLAGS },
-    { "w",      "set the pad area width expression",       OFFSET(w_expr), AV_OPT_TYPE_STRING, {.str = "iw"}, CHAR_MIN, CHAR_MAX, FLAGS },
-    { "height", "set the pad area height expression",      OFFSET(h_expr), AV_OPT_TYPE_STRING, {.str = "ih"}, CHAR_MIN, CHAR_MAX, FLAGS },
-    { "h",      "set the pad area height expression",      OFFSET(h_expr), AV_OPT_TYPE_STRING, {.str = "ih"}, CHAR_MIN, CHAR_MAX, FLAGS },
-    { "x",      "set the x offset expression for the input image position", OFFSET(x_expr), AV_OPT_TYPE_STRING, {.str = "0"}, CHAR_MIN, CHAR_MAX, FLAGS },
-    { "y",      "set the y offset expression for the input image position", OFFSET(y_expr), AV_OPT_TYPE_STRING, {.str = "0"}, CHAR_MIN, CHAR_MAX, FLAGS },
-    { "color",  "set the color of the padded area border", OFFSET(rgba_color), AV_OPT_TYPE_COLOR, {.str = "black"}, .flags = FLAGS },
-    { "aspect",  "pad to fit an aspect instead of a resolution", OFFSET(aspect), AV_OPT_TYPE_RATIONAL, {.dbl = 0}, 0, DBL_MAX, FLAGS },
-    { "is_p2p",  "enable p2p transfer", OFFSET(is_p2p), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, FLAGS },
-    { "auto_skip", "skip the pad filter when input and output of this filter are the same", OFFSET(auto_skip), AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGS},
-    { "buffer_limit",
-      "Whether to limit output buffering count, 0: no, 1: yes",
-      OFFSET(buffer_limit),
-      AV_OPT_TYPE_BOOL,
-      {.i64 = 0},
-      0,
-      1},
-
-    {"keep_alive_timeout",
-     "Specify a custom session keep alive timeout in seconds.",
-     OFFSET(keep_alive_timeout),
-     AV_OPT_TYPE_INT,
-     {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT},
-     NI_MIN_KEEP_ALIVE_TIMEOUT,
-     NI_MAX_KEEP_ALIVE_TIMEOUT,
-     FLAGS,
-     "keep_alive_timeout"},
+static const AVOption ni_pad_options[] = {
+    { "width",  "set the pad area width expression",                        OFFSET(w_expr),     AV_OPT_TYPE_STRING,   {.str = "iw"}, CHAR_MIN, CHAR_MAX, FLAGS },
+    { "w",      "set the pad area width expression",                        OFFSET(w_expr),     AV_OPT_TYPE_STRING,   {.str = "iw"}, CHAR_MIN, CHAR_MAX, FLAGS },
+    { "height", "set the pad area height expression",                       OFFSET(h_expr),     AV_OPT_TYPE_STRING,   {.str = "ih"}, CHAR_MIN, CHAR_MAX, FLAGS },
+    { "h",      "set the pad area height expression",                       OFFSET(h_expr),     AV_OPT_TYPE_STRING,   {.str = "ih"}, CHAR_MIN, CHAR_MAX, FLAGS },
+    { "x",      "set the x offset expression for the input image position", OFFSET(x_expr),     AV_OPT_TYPE_STRING,   {.str = "0"},  CHAR_MIN, CHAR_MAX, FLAGS },
+    { "y",      "set the y offset expression for the input image position", OFFSET(y_expr),     AV_OPT_TYPE_STRING,   {.str = "0"},  CHAR_MIN, CHAR_MAX, FLAGS },
+    { "color",  "set the color of the padded area border",                  OFFSET(rgba_color), AV_OPT_TYPE_COLOR,    {.str = "black"}, .flags = FLAGS },
+    { "aspect", "pad to fit an aspect instead of a resolution",             OFFSET(aspect),     AV_OPT_TYPE_RATIONAL, {.dbl = 0}, 0, DBL_MAX, FLAGS },
+    NI_FILT_OPTION_AUTO_SKIP,
+    NI_FILT_OPTION_IS_P2P,
+    NI_FILT_OPTION_KEEPALIVE,
+    NI_FILT_OPTION_BUFFER_LIMIT,
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(pad);
+AVFILTER_DEFINE_CLASS(ni_pad);
 
-static const AVFilterPad avfilter_vf_pad_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
         .name             = "default",
         .type             = AVMEDIA_TYPE_VIDEO,
@@ -782,7 +767,7 @@ static const AVFilterPad avfilter_vf_pad_inputs[] = {
 #endif
 };
 
-static const AVFilterPad avfilter_vf_pad_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
@@ -799,7 +784,7 @@ AVFilter ff_vf_pad_ni_quadra = {
     .name          = "ni_quadra_pad",
     .description   = NULL_IF_CONFIG_SMALL("NETINT Quadra pad the input video v" NI_XCODER_REVISION),
     .priv_size     = sizeof(NetIntPadContext),
-    .priv_class    = &pad_class,
+    .priv_class    = &ni_pad_class,
     .uninit        = uninit,
 #if IS_FFMPEG_61_AND_ABOVE
     .activate      = activate,
@@ -808,12 +793,12 @@ AVFilter ff_vf_pad_ni_quadra = {
     .flags_internal= FF_FILTER_FLAG_HWFRAME_AWARE,
 #endif
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
-    FILTER_INPUTS(avfilter_vf_pad_inputs),
-    FILTER_OUTPUTS(avfilter_vf_pad_outputs),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
     FILTER_QUERY_FUNC(query_formats),
 #else
-    .inputs        = avfilter_vf_pad_inputs,
-    .outputs       = avfilter_vf_pad_outputs,
+    .inputs        = inputs,
+    .outputs       = outputs,
     .query_formats = query_formats,
 #endif
 };

@@ -119,7 +119,7 @@ int ni_av1_write_uvlc(CodedBitstreamContext *ctx, PutBitContext *pbc,
     } else {
         zeroes = av_log2(value + 1);
         v = value - (1U << zeroes) + 1;
-    
+
         if (put_bits_left(pbc) < 2 * zeroes + 1)
             return AVERROR(ENOSPC);
 
@@ -150,7 +150,7 @@ static int ni_av1_read_leb128(CodedBitstreamContext *ctx, GetBitContext *gbc,
             return AVERROR_INVALIDDATA;
         }
         byte = get_bits(gbc, 8);
-    
+
         value |= (uint64_t)(byte & 0x7f) << (i * 7);
         if (!(byte & 0x80))
             break;

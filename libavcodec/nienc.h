@@ -47,16 +47,16 @@
 #define IS_FFMPEG_61_AND_ABOVE_FOR_LIBAVCODEC                                                \
     (LIBAVCODEC_VERSION_MAJOR  >= 60)
 
-#define OFFSETENC(x) offsetof(XCoderH265EncContext, x)
+#define OFFSETENC(x) offsetof(XCoderEncContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 
-// Define a macro to conditionally include "gen_global_headers" based on an argument
+// Common Netint encoder options
 #define NI_ENC_OPTIONS\
     { "xcoder", "Select which XCoder card to use.", OFFSETENC(dev_xcoder), \
       AV_OPT_TYPE_STRING, { .str = NI_BEST_MODEL_LOAD_STR }, CHAR_MIN, CHAR_MAX, VE, "xcoder" }, \
-    { "bestmodelload", "Pick the least model load XCoder/encoder available.", 0, AV_OPT_TYPE_CONST, \
+    {     "bestmodelload", "Pick the least model load XCoder/encoder available.", 0, AV_OPT_TYPE_CONST, \
           { .str = NI_BEST_MODEL_LOAD_STR }, 0, 0, VE, "xcoder" }, \
-    { "bestload", "Pick the least real load XCoder/encoder available.", 0, AV_OPT_TYPE_CONST, \
+    {     "bestload", "Pick the least real load XCoder/encoder available.", 0, AV_OPT_TYPE_CONST, \
           { .str = NI_BEST_REAL_LOAD_STR }, 0, 0, VE, "xcoder" }, \
     \
     { "enc", "Select which encoder to use by index. First is 0, second is 1, and so on.", \
@@ -82,9 +82,9 @@
     \
     { "keep_alive_timeout", "Specify a custom session keep alive timeout in seconds.", \
       OFFSETENC(keep_alive_timeout), AV_OPT_TYPE_INT, { .i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT }, \
-      NI_MIN_KEEP_ALIVE_TIMEOUT, NI_MAX_KEEP_ALIVE_TIMEOUT, VE },
+      NI_MIN_KEEP_ALIVE_TIMEOUT, NI_MAX_KEEP_ALIVE_TIMEOUT, VE }
 
-// Define a macro for the "gen_global_headers" options
+// "gen_global_headers" encoder options
 #define NI_ENC_OPTION_GEN_GLOBAL_HEADERS \
     { "gen_global_headers", "Generate SPS and PPS headers during codec initialization.", \
       OFFSETENC(gen_global_headers), AV_OPT_TYPE_INT, { .i64 = GEN_GLOBAL_HEADERS_OFF }, \
@@ -94,7 +94,11 @@
     {     "off", NULL, 0, AV_OPT_TYPE_CONST, \
           { .i64 = GEN_GLOBAL_HEADERS_OFF }, 0, 0, VE, "gen_global_headers" }, \
     {     "on", NULL, 0, AV_OPT_TYPE_CONST, \
-          { .i64 = GEN_GLOBAL_HEADERS_ON }, 0, 0, VE, "gen_global_headers" },
+          { .i64 = GEN_GLOBAL_HEADERS_ON }, 0, 0, VE, "gen_global_headers" }
+
+#define NI_ENC_OPTION_UDU_SEI \
+    { "udu_sei", "Pass through user data unregistered SEI if available", OFFSETENC(udu_sei), \
+      AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, VE }
 
 int xcoder_encode_init(AVCodecContext *avctx);
 
@@ -114,15 +118,15 @@ int xcoder_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
                         const AVFrame *frame, int *got_packet);
 #endif
 
-bool free_frames_isempty(XCoderH265EncContext *ctx);
+bool free_frames_isempty(XCoderEncContext *ctx);
 
-bool free_frames_isfull(XCoderH265EncContext *ctx);
+bool free_frames_isfull(XCoderEncContext *ctx);
 
-int deq_free_frames(XCoderH265EncContext *ctx);
+int deq_free_frames(XCoderEncContext *ctx);
 
-int enq_free_frames(XCoderH265EncContext *ctx, int idx);
+int enq_free_frames(XCoderEncContext *ctx, int idx);
 
-int recycle_index_2_avframe_index(XCoderH265EncContext *ctx, uint32_t recycleIndex);
+int recycle_index_2_avframe_index(XCoderEncContext *ctx, uint32_t recycleIndex);
 
 // Needed for hwframe on FFmpeg-n4.3+
 #if (LIBAVCODEC_VERSION_MAJOR >= 59 || LIBAVCODEC_VERSION_MAJOR >= 58 && LIBAVCODEC_VERSION_MINOR >= 82)

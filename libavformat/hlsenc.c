@@ -38,6 +38,7 @@
 #include "libavutil/log.h"
 #include "libavutil/random_seed.h"
 #include "libavutil/time.h"
+#include "libavutil/timestamp.h"
 #include "libavutil/time_internal.h"
 
 #include "libavcodec/defs.h"
@@ -153,6 +154,8 @@ typedef struct VariantStream {
     int discontinuity;
     int reference_stream_index;
 
+    ni_scte35_decoder *scte35_decoder;
+
     int64_t total_size;
     double total_duration;
     int64_t avg_bitrate;
@@ -265,8 +268,6 @@ typedef struct HLSContext {
     char *headers;
     int has_default_key; /* has DEFAULT field of var_stream_map */
     int has_video_m3u8; /* has video stream m3u8 list */
-
-    ni_scte35_decoder *scte35_decoder;
 } HLSContext;
 
 static int strftime_expand(const char *fmt, char **dest)
@@ -883,6 +884,9 @@ static int hls_mux_init(AVFormatContext *s, VariantStream *vs)
     }
 
     for (i = 0; i < vs->nb_streams; i++) {
+      if (vs->streams[i]->codecpar->codec_id == AV_CODEC_ID_SCTE_35)
+            continue;
+
         AVStream *st;
         AVFormatContext *loc;
         if (vs->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE)
@@ -2011,6 +2015,24 @@ fail:
     return ret;
 }
 
+static int get_nth_codec_id_stream_index(AVFormatContext *s,
+                                         enum AVCodecID codec_id,
+                                         int64_t stream_id)
+{
+    unsigned int stream_index, cnt;
+    if (stream_id < 0 || stream_id > s->nb_streams - 1)
+        return -1;
+    cnt = 0;
+    for (stream_index = 0; stream_index < s->nb_streams; stream_index++) {
+        if (s->streams[stream_index]->codecpar->codec_id != codec_id)
+            continue;
+        if (cnt == stream_id)
+            return stream_index;
+        cnt++;
+    }
+    return -1;
+}
+
 static int get_nth_codec_stream_index(AVFormatContext *s,
                                       enum AVMediaType codec_type,
                                       int64_t stream_id)
@@ -2039,6 +2061,7 @@ static int parse_variant_stream_mapstring(AVFormatContext *s)
     char *p, *q, *saveptr1, *saveptr2, *varstr, *keyval;
     const char *val;
 
+    // NETINT SCTE-35 support in var_stream_map
     /**
      * Expected format for var_stream_map string is as below:
      * "a:0,v:0 a:1,v:1"
@@ -2047,7 +2070,7 @@ static int parse_variant_stream_mapstring(AVFormatContext *s)
      * into different variant streams. The variant stream groups are separated
      * by space.
      *
-     * a:, v:, s: are keys to specify audio, video and subtitle streams
+     * a:, v:, s:, scte35: are keys to specify audio, video and subtitle streams
      * respectively. Allowed values are 0 to 9 digits (limited just based on
      * practical usage)
      *
@@ -2086,7 +2109,7 @@ static int parse_variant_stream_mapstring(AVFormatContext *s)
         q = varstr;
         while (1) {
             if (!av_strncasecmp(q, "a:", 2) || !av_strncasecmp(q, "v:", 2) ||
-                !av_strncasecmp(q, "s:", 2))
+                !av_strncasecmp(q, "s:", 2) || !av_strncasecmp(q, "scte35:", 7))
                 vs->nb_streams++;
             q = strchr(q, ',');
             if (!q)
@@ -2129,6 +2152,8 @@ static int parse_variant_stream_mapstring(AVFormatContext *s)
                 codec_type = AVMEDIA_TYPE_AUDIO;
             } else if (av_strstart(keyval, "s:", &val)) {
                 codec_type = AVMEDIA_TYPE_SUBTITLE;
+            } else if (av_strstart(keyval, "scte35:", &val)) {
+                codec_type = AVMEDIA_TYPE_DATA;
             } else {
                 av_log(s, AV_LOG_ERROR, "Invalid keyval %s\n", keyval);
                 return AVERROR(EINVAL);
@@ -2139,7 +2164,11 @@ static int parse_variant_stream_mapstring(AVFormatContext *s)
                 av_log(s, AV_LOG_ERROR, "Invalid stream number: '%s'\n", val);
                 return AVERROR(EINVAL);
             }
-            stream_index = get_nth_codec_stream_index(s, codec_type, num);
+            if (codec_type == AVMEDIA_TYPE_DATA)
+                stream_index = get_nth_codec_id_stream_index(
+                    s, AV_CODEC_ID_SCTE_35, num);
+            else
+                stream_index = get_nth_codec_stream_index(s, codec_type, num);
 
             if (stream_index >= 0 && nb_streams < vs->nb_streams) {
                 for (i = 0; nb_streams > 0 && i < nb_streams; i++) {
@@ -2337,6 +2366,7 @@ static int hls_write_header(AVFormatContext *s)
 
     for (i = 0; i < hls->nb_varstreams; i++) {
         int subtitle_streams = 0;
+        int scte35_streams = 0;
         vs = &hls->var_streams[i];
 
         ret = avformat_write_header(vs->avf, NULL);
@@ -2346,6 +2376,11 @@ static int hls_write_header(AVFormatContext *s)
         for (j = 0; j < vs->nb_streams; j++) {
             AVStream *inner_st;
             AVStream *outer_st = vs->streams[j];
+
+            if (outer_st->codecpar->codec_id == AV_CODEC_ID_SCTE_35) {
+                scte35_streams++;
+                continue;
+            }
 
             if (hls->max_seg_size > 0) {
                 if ((outer_st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) &&
@@ -2357,7 +2392,7 @@ static int hls_write_header(AVFormatContext *s)
             }
 
             if (outer_st->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE)
-                inner_st = vs->avf->streams[j - subtitle_streams];
+                inner_st = vs->avf->streams[j - subtitle_streams - scte35_streams];
             else if (vs->vtt_avf) {
                 inner_st = vs->vtt_avf->streams[0];
                 subtitle_streams++;
@@ -2447,6 +2482,8 @@ static int hls_write_packet(AVFormatContext *s, AVPacket *pkt)
     int is_ref_pkt = 1;
     int ret = 0, can_split = 1, i, j;
     int stream_index = 0;
+    int subtitle_streams = 0;
+    int scte35_streams = 0;
     int range_length = 0;
     const char *proto = NULL;
     int use_temp_file = 0;
@@ -2454,11 +2491,15 @@ static int hls_write_packet(AVFormatContext *s, AVPacket *pkt)
     char *old_filename = NULL;
 
     for (i = 0; i < hls->nb_varstreams; i++) {
-        int subtitle_streams = 0;
+        subtitle_streams = 0;
+        scte35_streams = 0;
+
         vs = &hls->var_streams[i];
         for (j = 0; j < vs->nb_streams; j++) {
             if (vs->streams[j]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) {
                 subtitle_streams++;
+            } else if (vs->streams[j]->codecpar->codec_id == AV_CODEC_ID_SCTE_35) {
+                scte35_streams++;
             }
             if (vs->streams[j] == st) {
                 if (st->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) {
@@ -2466,7 +2507,7 @@ static int hls_write_packet(AVFormatContext *s, AVPacket *pkt)
                     stream_index = 0;
                 } else {
                     oc = vs->avf;
-                    stream_index = j - subtitle_streams;
+                    stream_index = j - subtitle_streams - scte35_streams;
                 }
                 break;
             }
@@ -2477,21 +2518,21 @@ static int hls_write_packet(AVFormatContext *s, AVPacket *pkt)
     }
 
     if (!oc) {
-        av_log(s, AV_LOG_ERROR, "Unable to find mapping variant stream\n");
-        return AVERROR(ENOMEM);
+        av_log(s, AV_LOG_WARNING, "Unable to find mapping variant stream, pkt "
+               "stream_index %d codec: %s\n",
+               pkt->stream_index, avcodec_get_name(st->codecpar->codec_id));
+
+        // keep going if this is data stream, otherwise stop
+        if (st->codecpar->codec_type == AVMEDIA_TYPE_DATA)
+            return 0;
+        else {
+            av_log(s, AV_LOG_ERROR, "Unable to find mapping variant stream\n");
+            return AVERROR(ENOMEM);
+        }
     }
 
-    if (st->codecpar->codec_id == AV_CODEC_ID_SCTE_35) {
-        if (!hls->scte35_decoder) {
-            hls->scte35_decoder = ff_alloc_ni_scte35_decoder();
-            if (!hls->scte35_decoder) {
-                return AVERROR(ENOMEM);
-            }
-        }
-        ret = decode_scte35(hls->scte35_decoder, pkt);
-        if (ret) {
-            return ret;
-        }
+    if (st->codecpar->codec_id == AV_CODEC_ID_SCTE_35 && vs->scte35_decoder) {
+        return decode_scte35(vs->scte35_decoder, pkt);
     }
 
     end_pts = hls->recording_time * vs->number;
@@ -2542,8 +2583,24 @@ static int hls_write_packet(AVFormatContext *s, AVPacket *pkt)
     }
 
     can_split = can_split && (pkt->pts - vs->end_pts > 0);
-    if (vs->packets_written && can_split && av_compare_ts(pkt->pts - vs->start_pts, st->time_base,
-                                                          end_pts, AV_TIME_BASE_Q) >= 0) {
+
+    if (vs->scte35_decoder && can_split && is_ref_pkt)
+        av_log(s, AV_LOG_DEBUG, "vs %s is_ref_pkt, pts %s duration %ld "
+               "key_frame: %s, can_split now, packets_written %d,"
+               "av_compare_ts (pkt->pts %ld - vs->start_pts %ld (%d/%d) end_pts %ld (1/%d) : %d\n",
+               vs->varname ? vs->varname : "NONE", av_ts2str(pkt->pts),
+               pkt->duration, pkt->flags & AV_PKT_FLAG_KEY ? "YES" : "no",
+               vs->packets_written,
+               pkt->pts, vs->start_pts, st->time_base.num, st->time_base.den,
+               end_pts, AV_TIME_BASE,
+               av_compare_ts(pkt->pts - vs->start_pts, st->time_base, end_pts, AV_TIME_BASE_Q) >= 0);
+
+    if (vs->packets_written && can_split &&
+        (av_compare_ts(pkt->pts - vs->start_pts, st->time_base,
+                       end_pts, AV_TIME_BASE_Q) >= 0 ||
+         (vs->scte35_decoder &&
+          is_at_splice_point(vs->scte35_decoder,
+                             pkt->pts + pkt->duration, &st->time_base)))) {
         int64_t new_start_pos;
         int byterange_mode = (hls->flags & HLS_SINGLE_FILE) || (hls->max_seg_size > 0);
         double cur_duration;
@@ -2660,8 +2717,8 @@ static int hls_write_packet(AVFormatContext *s, AVPacket *pkt)
 
         cur_duration = (double)(pkt->pts - vs->end_pts) * st->time_base.num / st->time_base.den;
         ret = hls_append_segment(s, hls, vs, cur_duration, vs->start_pos, vs->size);
-        if (hls->scte35_decoder) {
-            try_get_scte35_tag(hls->scte35_decoder, pkt->pts, &st->time_base, vs->last_segment->scte35_tag);
+        if (vs->scte35_decoder) {
+            try_get_scte35_tag(vs->scte35_decoder, pkt->pts + pkt->duration, &st->time_base, vs->last_segment->scte35_tag);
         }
         vs->end_pts = pkt->pts;
         vs->duration = 0;
@@ -2760,6 +2817,8 @@ static void hls_deinit(AVFormatContext *s)
         hls_free_segments(vs->old_segments);
         av_freep(&vs->m3u8_name);
         av_freep(&vs->streams);
+
+        ff_free_ni_scte35_decoder(vs->scte35_decoder);
     }
 
     ff_format_io_close(s, &hls->m3u8_out);
@@ -2769,8 +2828,6 @@ static void hls_deinit(AVFormatContext *s)
     av_freep(&hls->var_streams);
     av_freep(&hls->cc_streams);
     av_freep(&hls->master_m3u8_url);
-
-    ff_free_ni_scte35_decoder(hls->scte35_decoder);
 }
 
 static int hls_write_trailer(struct AVFormatContext *s)
@@ -2927,8 +2984,6 @@ static int hls_init(AVFormatContext *s)
     int fmp4_init_filename_len = strlen(hls->fmp4_init_filename) + 1;
     double initial_program_date_time = av_gettime() / 1000000.0;
 
-    hls->scte35_decoder = NULL;
-
     if (hls->use_localtime) {
         pattern = get_default_pattern_localtime_fmt(s);
     } else {
@@ -3032,6 +3087,13 @@ static int hls_init(AVFormatContext *s)
                 vs->reference_stream_index = vs->streams[j]->index;
             }
             vs->has_subtitle += vs->streams[j]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE;
+
+            if (AV_CODEC_ID_SCTE_35 == vs->streams[j]->codecpar->codec_id &&
+                NULL == vs->scte35_decoder) {
+                vs->scte35_decoder = ff_alloc_ni_scte35_decoder();
+                if (!vs->scte35_decoder)
+                    return AVERROR(ENOMEM);
+            }
         }
 
         if (vs->has_video > 1)

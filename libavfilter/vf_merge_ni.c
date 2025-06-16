@@ -56,9 +56,20 @@ typedef struct NetIntMergeContext {
     ni_split_context_t src_ctx;
 } NetIntMergeContext;
 
-#if !IS_FFMPEG_342_AND_ABOVE
-static int config_output(AVFilterLink *outlink, AVFrame *in);
-#endif
+static int query_formats(AVFilterContext *ctx)
+{
+    /* We only accept hardware frames */
+    static const enum AVPixelFormat pix_fmts[] =
+        {AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE};
+    AVFilterFormats *formats;
+
+    formats = ff_make_format_list(pix_fmts);
+
+    if (!formats)
+        return AVERROR(ENOMEM);
+
+    return ff_set_common_formats(ctx, formats);
+}
 
 static av_cold void uninit(AVFilterContext *ctx)
 {
@@ -76,19 +87,60 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_buffer_unref(&s->out_frames_ref);
 }
 
-static int query_formats(AVFilterContext *ctx)
+
+#if IS_FFMPEG_342_AND_ABOVE
+static int config_input(AVFilterLink *inlink)
+#else
+static int config_input_0(AVFilterLink *inlink, AVFrame *in)
+#endif
 {
-    /* We only accept hardware frames */
-    static const enum AVPixelFormat pix_fmts[] =
-        {AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE};
-    AVFilterFormats *formats;
+    NetIntMergeContext *s = inlink->dst->priv;
+    AVHWFramesContext *in_frames_ctx;
+    AVNIFramesContext *src_ctx;
+    ni_split_context_t *p_split_ctx_src;
 
-    formats = ff_make_format_list(pix_fmts);
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(inlink->dst, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
+    if (inlink->hw_frames_ctx == NULL) {
+        av_log(inlink->dst, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)inlink->hw_frames_ctx->data;
+#else
+    in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
+#endif
+    if (!in_frames_ctx) {
+        return AVERROR(EINVAL);
+    }
 
-    if (!formats)
-        return AVERROR(ENOMEM);
+    src_ctx = (AVNIFramesContext*) in_frames_ctx->hwctx;
+    p_split_ctx_src = &src_ctx->split_ctx;
+    if (!p_split_ctx_src->enabled) {
+        av_log(inlink->dst, AV_LOG_ERROR, "There is no extra ppu output\n");
+        return AVERROR(EINVAL);
+    }
+    memcpy(&s->src_ctx, p_split_ctx_src, sizeof(ni_split_context_t));
 
-    return ff_set_common_formats(ctx, formats);
+    if (in_frames_ctx->sw_format != AV_PIX_FMT_YUV420P &&
+        in_frames_ctx->sw_format != AV_PIX_FMT_NV12 &&
+        in_frames_ctx->sw_format != AV_PIX_FMT_YUV420P10LE &&
+        in_frames_ctx->sw_format != AV_PIX_FMT_P010LE) {
+        av_log(inlink->dst, AV_LOG_ERROR,
+               "merge filter does not support this format: %s\n", av_get_pix_fmt_name(in_frames_ctx->sw_format));
+        return AVERROR(EINVAL);
+    }
+    if ((s->src_ctx.f[0] != s->src_ctx.f[1]) || (s->src_ctx.f[0] != s->src_ctx.f[1])) {
+        av_log(inlink->dst, AV_LOG_ERROR, "The PPU0 and PPU1 must have the same format\n");
+        return AVERROR(EINVAL);
+    }
+
+    return 0;
 }
 
 static int init_out_pool(AVFilterContext *ctx)
@@ -113,6 +165,87 @@ static int init_out_pool(AVFilterContext *ctx)
                                   out_frames_ctx->height, out_frames_ctx->sw_format,
                                   pool_size,
                                   s->buffer_limit);
+}
+
+#if IS_FFMPEG_342_AND_ABOVE
+static int config_output(AVFilterLink *outlink)
+#else
+static int config_output_dummy(AVFilterLink *outlink)
+{
+    return 0;
+}
+
+static int config_output(AVFilterLink *outlink, AVFrame *in)
+#endif
+{
+    AVFilterContext *ctx = outlink->src;
+    NetIntMergeContext *s = ctx->priv;
+    AVHWFramesContext *in_frames_ctx;
+    AVHWFramesContext *out_frames_ctx;
+    int ret = 0;
+
+    outlink->w = s->src_ctx.w[1];
+    outlink->h = s->src_ctx.h[1];
+    outlink->sample_aspect_ratio = outlink->src->inputs[0]->sample_aspect_ratio;
+
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
+#elif IS_FFMPEG_342_AND_ABOVE
+    if (ctx->inputs[0]->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
+#else
+    if (in->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
+#endif
+    if (s->src_ctx.h[0] == s->src_ctx.h[1] && s->src_ctx.w[0] == s->src_ctx.w[1]) {
+#if IS_FFMPEG_71_AND_ABOVE
+        s->out_frames_ref = av_buffer_ref(li->hw_frames_ctx);
+#else
+        s->out_frames_ref = av_buffer_ref(ctx->inputs[0]->hw_frames_ctx);
+#endif
+    }
+    else {
+        s->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
+        if (!s->out_frames_ref)
+            return AVERROR(ENOMEM);
+
+        out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
+        out_frames_ctx->format    = AV_PIX_FMT_NI_QUAD;
+        out_frames_ctx->width     = outlink->w;
+        out_frames_ctx->height    = outlink->h;
+        out_frames_ctx->sw_format = in_frames_ctx->sw_format;
+        out_frames_ctx->initial_pool_size =
+            NI_MERGE_ID; // Repurposed as identity code
+
+        av_hwframe_ctx_init(s->out_frames_ref);
+
+    }
+
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *lo = ff_filter_link(outlink);
+    av_buffer_unref(&lo->hw_frames_ctx);
+    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!lo->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#else
+    av_buffer_unref(&outlink->hw_frames_ctx);
+    outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
+    if (!outlink->hw_frames_ctx)
+        return AVERROR(ENOMEM);
+#endif
+
+    return ret;
 }
 
 static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
@@ -183,19 +316,16 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
         s->session_opened = 1;
 #if ((LIBXCODER_API_VERSION_MAJOR > 2) ||                                        \
       (LIBXCODER_API_VERSION_MAJOR == 2 && LIBXCODER_API_VERSION_MINOR>= 76))
-        if (s->params.scaler_param_b != 0 || s->params.scaler_param_c != 0.75)
-        {
+        if (s->params.scaler_param_b != 0 || s->params.scaler_param_c != 0.75) {
             s->params.enable_scaler_params = true;
         }
-        else
-        {
+        else {
             s->params.enable_scaler_params = false;
         }
 #endif
         if (s->params.filterblit) {
             retcode = ni_scaler_set_params(&s->api_ctx, &(s->params));
-            if (retcode < 0)
-            {
+            if (retcode < 0) {
                 av_log(ctx, AV_LOG_ERROR,
                    "Set params error %d\n", retcode);
                 goto fail;
@@ -215,7 +345,10 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
         ni_device_session_copy(&s->api_ctx, &out_ni_ctx->api_ctx);
         ((AVNIFramesContext *) out_frames_ctx->hwctx)->split_ctx.enabled = 0;
 
-        if (frame && frame->color_range == AVCOL_RANGE_JPEG) {
+        AVHWFramesContext *pAVHFWCtx = (AVHWFramesContext *)frame->hw_frames_ctx->data;
+        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pAVHFWCtx->sw_format);
+
+        if ((frame->color_range == AVCOL_RANGE_JPEG) && !(desc->flags & AV_PIX_FMT_FLAG_RGB)) {
             av_log(ctx, AV_LOG_WARNING,
                    "WARNING: Full color range input, limited color range output\n");
         }
@@ -243,21 +376,20 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
      * incoming hardware frame index to the scaler manager.
      */
     retcode = ni_device_alloc_frame(
-        &s->api_ctx,                                             //
-        FFALIGN(frame->width, 2),                //
-        FFALIGN(frame->height, 2),               //
-        frame_scaler_format,                                      //
-        (frame_0_surface && frame_1_surface->encoding_type == 2) ? NI_SCALER_FLAG_CMP : 0,                                                       //
-        FFALIGN(frame->width, 2),                //
-        FFALIGN(frame->height, 2),               //
-        0,                                                    //
-        0,                                                    //
-        frame_0_surface->ui32nodeAddress, //
-        frame_0_surface->ui16FrameIdx,         //
+        &s->api_ctx,
+        FFALIGN(frame->width, 2),
+        FFALIGN(frame->height, 2),
+        frame_scaler_format,
+        (frame_0_surface && frame_1_surface->encoding_type == 2) ? NI_SCALER_FLAG_CMP : 0,
+        FFALIGN(frame->width, 2),
+        FFALIGN(frame->height, 2),
+        0,
+        0,
+        frame_0_surface->ui32nodeAddress,
+        frame_0_surface->ui16FrameIdx,
         NI_DEVICE_TYPE_SCALER);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_DEBUG, "Can't assign frame for merge input %d\n",
                retcode);
         retcode = AVERROR(ENOMEM);
@@ -270,21 +402,20 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
      */
     flags =  NI_SCALER_FLAG_IO;
     flags |= (frame_1_surface && frame_1_surface->encoding_type == 2) ? NI_SCALER_FLAG_CMP : 0;
-    retcode = ni_device_alloc_frame(&s->api_ctx,                    //
-                                    FFALIGN(outlink->w, 2),       //
-                                    FFALIGN(outlink->h, 2),      //
-                                    frame_scaler_format,             //
-                                    flags,                          //
-                                    FFALIGN(outlink->w, 2),       //
-                                    FFALIGN(outlink->h, 2),      //
+    retcode = ni_device_alloc_frame(&s->api_ctx,
+                                    FFALIGN(outlink->w, 2),
+                                    FFALIGN(outlink->h, 2),
+                                    frame_scaler_format,
+                                    flags,
+                                    FFALIGN(outlink->w, 2),
+                                    FFALIGN(outlink->h, 2),
                                     0,                              // x
                                     0,                              // y
-                                    frame_1_surface->ui32nodeAddress, //
-                                    frame_1_surface->ui16FrameIdx,    //
+                                    frame_1_surface->ui32nodeAddress,
+                                    frame_1_surface->ui16FrameIdx,
                                     NI_DEVICE_TYPE_SCALER);
 
-    if (retcode != NI_RETCODE_SUCCESS)
-    {
+    if (retcode != NI_RETCODE_SUCCESS) {
         av_log(ctx, AV_LOG_DEBUG, "Can't allocate frame for output %d\n",
                retcode);
         retcode = AVERROR(ENOMEM);
@@ -373,8 +504,7 @@ static int activate(AVFilterContext *ctx)
     av_log(ctx, AV_LOG_TRACE, "%s: ready %u inlink framequeue %u outlink framequeue %u\n",
         __func__, ctx->ready, ff_inlink_queued_frames(inlink), ff_inlink_queued_frames(outlink));
 
-    if (ff_inlink_check_available_frame(inlink))
-    {
+    if (ff_inlink_check_available_frame(inlink)) {
         // Consume from inlink framequeue only when outlink framequeue is empty, to prevent filter from exhausting all pre-allocated device buffers
         if (ff_inlink_check_available_frame(outlink))
             return FFERROR_NOT_READY;
@@ -383,7 +513,11 @@ static int activate(AVFilterContext *ctx)
         if (ret < 0)
             return ret;
 
-        return filter_frame(inlink, frame);
+        ret = filter_frame(inlink, frame);
+        if (ret >= 0) {
+            ff_filter_set_ready(ctx, 300);
+        }
+        return ret;
     }
 
     // We did not get a frame from input link, check its status
@@ -396,167 +530,23 @@ static int activate(AVFilterContext *ctx)
 }
 #endif
 
-#if IS_FFMPEG_342_AND_ABOVE
-static int config_input(AVFilterLink *inlink)
-#else
-static int config_input_0(AVFilterLink *inlink, AVFrame *in)
-#endif
-{
-    NetIntMergeContext *s = inlink->dst->priv;
-    AVHWFramesContext *in_frames_ctx;
-    AVNIFramesContext *src_ctx;
-    ni_split_context_t *p_split_ctx_src;
-
-#if IS_FFMPEG_71_AND_ABOVE
-    FilterLink *li = ff_filter_link(inlink);
-    if (li->hw_frames_ctx == NULL) {
-        av_log(inlink->dst, AV_LOG_ERROR, "No hw context provided on input\n");
-        return AVERROR(EINVAL);
-    }
-    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
-#elif IS_FFMPEG_342_AND_ABOVE
-    if (inlink->hw_frames_ctx == NULL) {
-        av_log(inlink->dst, AV_LOG_ERROR, "No hw context provided on input\n");
-        return AVERROR(EINVAL);
-    }
-    in_frames_ctx = (AVHWFramesContext *)inlink->hw_frames_ctx->data;
-#else
-    in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
-#endif
-    if (!in_frames_ctx) {
-        return AVERROR(EINVAL);
-    }
-
-    src_ctx = (AVNIFramesContext*) in_frames_ctx->hwctx;
-    p_split_ctx_src = &src_ctx->split_ctx;
-    if(!p_split_ctx_src->enabled)
-    {
-        av_log(inlink->dst, AV_LOG_ERROR, "There is no extra ppu output\n");
-        return AVERROR(EINVAL);
-    }
-    memcpy(&s->src_ctx, p_split_ctx_src, sizeof(ni_split_context_t));
-
-    if (in_frames_ctx->sw_format != AV_PIX_FMT_YUV420P &&
-        in_frames_ctx->sw_format != AV_PIX_FMT_NV12 &&
-        in_frames_ctx->sw_format != AV_PIX_FMT_YUV420P10LE &&
-        in_frames_ctx->sw_format != AV_PIX_FMT_P010LE) {
-        av_log(inlink->dst, AV_LOG_ERROR,
-               "merge filter does not support this format: %s\n", av_get_pix_fmt_name(in_frames_ctx->sw_format));
-        return AVERROR(EINVAL);
-    }
-    if((s->src_ctx.f[0] != s->src_ctx.f[1]) || (s->src_ctx.f[0] != s->src_ctx.f[1]))
-    {
-        av_log(inlink->dst, AV_LOG_ERROR, "The PPU0 and PPU1 must have the same format\n");
-        return AVERROR(EINVAL);
-    }
-
-    return 0;
-}
-
-#if IS_FFMPEG_342_AND_ABOVE
-static int config_output(AVFilterLink *outlink)
-#else
-static int config_output_dummy(AVFilterLink *outlink)
-{
-    return 0;
-}
-
-static int config_output(AVFilterLink *outlink, AVFrame *in)
-#endif
-{
-    AVFilterContext *ctx = outlink->src;
-    NetIntMergeContext *s = ctx->priv;
-    AVHWFramesContext *in_frames_ctx;
-    AVHWFramesContext *out_frames_ctx;
-    int ret = 0;
-
-    outlink->w = s->src_ctx.w[1];
-    outlink->h = s->src_ctx.h[1];
-    outlink->sample_aspect_ratio = outlink->src->inputs[0]->sample_aspect_ratio;
-
-#if IS_FFMPEG_71_AND_ABOVE
-    FilterLink *li = ff_filter_link(ctx->inputs[0]);
-    in_frames_ctx = (AVHWFramesContext *)li->hw_frames_ctx->data;
-#elif IS_FFMPEG_342_AND_ABOVE
-    in_frames_ctx = (AVHWFramesContext *)ctx->inputs[0]->hw_frames_ctx->data;
-#else
-    in_frames_ctx = (AVHWFramesContext *)in->hw_frames_ctx->data;
-#endif
-    if(s->src_ctx.h[0] == s->src_ctx.h[1] && s->src_ctx.w[0] == s->src_ctx.w[1])
-    {
-#if IS_FFMPEG_71_AND_ABOVE
-        s->out_frames_ref = av_buffer_ref(li->hw_frames_ctx);
-#else
-        s->out_frames_ref = av_buffer_ref(ctx->inputs[0]->hw_frames_ctx);
-#endif
-    }
-    else
-    {
-        s->out_frames_ref = av_hwframe_ctx_alloc(in_frames_ctx->device_ref);
-        if (!s->out_frames_ref)
-            return AVERROR(ENOMEM);
-
-        out_frames_ctx = (AVHWFramesContext *)s->out_frames_ref->data;
-        out_frames_ctx->format    = AV_PIX_FMT_NI_QUAD;
-        out_frames_ctx->width     = outlink->w;
-        out_frames_ctx->height    = outlink->h;
-        out_frames_ctx->sw_format = in_frames_ctx->sw_format;
-        out_frames_ctx->initial_pool_size =
-            NI_MERGE_ID; // Repurposed as identity code
-
-        av_hwframe_ctx_init(s->out_frames_ref);
-
-    }
-
-#if IS_FFMPEG_71_AND_ABOVE
-    FilterLink *lo = ff_filter_link(outlink);
-    av_buffer_unref(&lo->hw_frames_ctx);
-    lo->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-    if (!lo->hw_frames_ctx)
-        return AVERROR(ENOMEM);
-#else
-    av_buffer_unref(&outlink->hw_frames_ctx);
-    outlink->hw_frames_ctx = av_buffer_ref(s->out_frames_ref);
-    if (!outlink->hw_frames_ctx)
-        return AVERROR(ENOMEM);
-#endif
-
-    return ret;
-}
-
 #define OFFSET(x) offsetof(NetIntMergeContext, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_FILTERING_PARAM)
 
-static const AVOption merge_options[] = {
-    { "keep_alive_timeout",
-      "Specify a custom session keep alive timeout in seconds.",
-        OFFSET(keep_alive_timeout),
-        AV_OPT_TYPE_INT,
-          {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT},
-        NI_MIN_KEEP_ALIVE_TIMEOUT,
-        NI_MAX_KEEP_ALIVE_TIMEOUT,
-        FLAGS,
-        "keep_alive_timeout"},
-    { "filterblit", "filterblit enable", OFFSET(params.filterblit), AV_OPT_TYPE_INT, {.i64=0}, 0, 2, FLAGS },
-#if ((LIBXCODER_API_VERSION_MAJOR > 2) ||                                        \
-      (LIBXCODER_API_VERSION_MAJOR == 2 && LIBXCODER_API_VERSION_MINOR>= 76))
-    { "param_b", "Parameter B for bicubic", OFFSET(params.scaler_param_b), AV_OPT_TYPE_DOUBLE, {.dbl=-1}, INT_MIN, INT_MAX, FLAGS },
-    { "param_c", "Parameter C for bicubic", OFFSET(params.scaler_param_c), AV_OPT_TYPE_DOUBLE, {.dbl=-1}, INT_MIN, INT_MAX, FLAGS },
+static const AVOption ni_merge_options[] = {
+    { "filterblit", "filterblit enable",       OFFSET(params.filterblit),     AV_OPT_TYPE_INT,    {.i64=0},    0, 4, FLAGS },
+#if ((LIBXCODER_API_VERSION_MAJOR > 2) || (LIBXCODER_API_VERSION_MAJOR == 2 && LIBXCODER_API_VERSION_MINOR>= 76))
+    { "param_b",    "Parameter B for bicubic", OFFSET(params.scaler_param_b), AV_OPT_TYPE_DOUBLE, {.dbl=0.0},  0, 1, FLAGS },
+    { "param_c",    "Parameter C for bicubic", OFFSET(params.scaler_param_c), AV_OPT_TYPE_DOUBLE, {.dbl=0.75}, 0, 1, FLAGS },
 #endif
-    {"buffer_limit",
-     "Whether to limit output buffering count, 0: no, 1: yes",
-     OFFSET(buffer_limit),
-     AV_OPT_TYPE_BOOL,
-     {.i64 = 0},
-     0,
-     1},
-
+    NI_FILT_OPTION_KEEPALIVE,
+    NI_FILT_OPTION_BUFFER_LIMIT,
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(merge);
+AVFILTER_DEFINE_CLASS(ni_merge);
 
-static const AVFilterPad avfilter_vf_merge_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
         .name         = "input",
         .type         = AVMEDIA_TYPE_VIDEO,
@@ -570,14 +560,14 @@ static const AVFilterPad avfilter_vf_merge_inputs[] = {
 #endif
 };
 
-static const AVFilterPad avfilter_vf_merge_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
 #if IS_FFMPEG_342_AND_ABOVE
         .config_props  = config_output,
 #else
-        .config_props = config_output_dummy,
+        .config_props  = config_output_dummy,
 #endif
     },
 #if (LIBAVFILTER_VERSION_MAJOR < 8)
@@ -586,24 +576,24 @@ static const AVFilterPad avfilter_vf_merge_outputs[] = {
 };
 
 AVFilter ff_vf_merge_ni_quadra = {
-    .name          = "ni_quadra_merge",
-    .description   = NULL_IF_CONFIG_SMALL("NETINT Quadra merge a video source on top of the input v" NI_XCODER_REVISION),
-    .uninit        = uninit,
+    .name           = "ni_quadra_merge",
+    .description    = NULL_IF_CONFIG_SMALL("NETINT Quadra merge a video source on top of the input v" NI_XCODER_REVISION),
+    .uninit         = uninit,
 #if IS_FFMPEG_61_AND_ABOVE
-    .activate      = activate,
+    .activate       = activate,
 #endif
-    .priv_size     = sizeof(NetIntMergeContext),
-    .priv_class    = &merge_class,
+    .priv_size      = sizeof(NetIntMergeContext),
+    .priv_class     = &ni_merge_class,
 #if IS_FFMPEG_342_AND_ABOVE
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 #endif
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
-    FILTER_INPUTS(avfilter_vf_merge_inputs),
-    FILTER_OUTPUTS(avfilter_vf_merge_outputs),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
     FILTER_QUERY_FUNC(query_formats),
 #else
-    .inputs        = avfilter_vf_merge_inputs,
-    .outputs       = avfilter_vf_merge_outputs,
-    .query_formats = query_formats,
+    .inputs         = inputs,
+    .outputs        = outputs,
+    .query_formats  = query_formats,
 #endif
 };

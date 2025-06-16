@@ -65,86 +65,6 @@ typedef struct NetIntP2PXferContext {
 AVFilter ff_vf_p2pxfer_ni;
 
 #ifndef _WIN32
-static int cleanup_dma_buf(
-    AVFilterContext *ctx,
-    int domain,
-    int bus,
-    int dev,
-    int fnc);
-#endif
-
-static av_cold int preinit(AVFilterContext *ctx)
-{
-    NetIntP2PXferContext *s = ctx->priv;
-
-#ifdef _WIN32
-    av_log(ctx, AV_LOG_ERROR, "MS Windows not supported\n");
-    return AVERROR(EINVAL);
-#else
-    /* Check for the NetInt kernel device driver */
-    s->fd = open("/dev/netint", O_RDWR);
-
-    if (s->fd < 0) {
-        switch (errno) {
-        case EACCES:
-            av_log(ctx, AV_LOG_ERROR, "No permission to access /dev/netint\n");
-            break;
-        case ENOENT:
-        case ENODEV:
-            av_log(ctx, AV_LOG_ERROR, "NetInt kernel driver not installed\n");
-            break;
-        default:
-            perror("p2pxfer");
-            break;
-        }
-
-        return AVERROR(errno);
-    }
-
-    return 0;
-#endif
-}
-
-static av_cold void uninit(AVFilterContext *ctx)
-{
-    NetIntP2PXferContext *s = ctx->priv;
-
-    /* Close hwupload P2P session on target device */
-    if (s->fd > 0)
-        close(s->fd);
-
-#ifndef _WIN32
-    if (s->initialized) {
-        if (cleanup_dma_buf(ctx,0,0,0,0) < 0) {
-            av_log(ctx, AV_LOG_ERROR, "Can't clean up DMA buffer\n");
-        }
-    }
-#endif
-
-    if (s->session_opened) {
-        ni_device_session_close(&s->api_ctx, 1, NI_DEVICE_TYPE_UPLOAD);
-        ni_device_session_context_clear(&s->api_ctx);
-    }
-
-    av_frame_free(&s->out);
-}
-
-static int query_formats(AVFilterContext *ctx)
-{
-    static const enum AVPixelFormat pix_fmts[] =
-        { AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE };
-    AVFilterFormats *formats;
-
-    /* This filter only sends and receives hw frames */
-    formats = ff_make_format_list(pix_fmts);
-
-    if (!formats)
-        return AVERROR(ENOMEM);
-
-    return ff_set_common_formats(ctx, formats);
-}
-
-#ifndef _WIN32
 static int val(char c)
 {
     if ((c >= '0') && (c <= '9'))
@@ -254,20 +174,99 @@ static int cleanup_dma_buf(
 }
 #endif
 
+static int query_formats(AVFilterContext *ctx)
+{
+    static const enum AVPixelFormat pix_fmts[] =
+        { AV_PIX_FMT_NI_QUAD, AV_PIX_FMT_NONE };
+    AVFilterFormats *formats;
+
+    /* This filter only sends and receives hw frames */
+    formats = ff_make_format_list(pix_fmts);
+
+    if (!formats)
+        return AVERROR(ENOMEM);
+
+    return ff_set_common_formats(ctx, formats);
+}
+
+static av_cold int preinit(AVFilterContext *ctx)
+{
+    NetIntP2PXferContext *s = ctx->priv;
+
+#ifdef _WIN32
+    av_log(ctx, AV_LOG_ERROR, "MS Windows not supported\n");
+    return AVERROR(EINVAL);
+#else
+    /* Check for the NetInt kernel device driver */
+    s->fd = open("/dev/netint", O_RDWR);
+
+    if (s->fd < 0) {
+        switch (errno) {
+        case EACCES:
+            av_log(ctx, AV_LOG_ERROR, "No permission to access /dev/netint\n");
+            break;
+        case ENOENT:
+        case ENODEV:
+            av_log(ctx, AV_LOG_ERROR, "NetInt kernel driver not installed\n");
+            break;
+        default:
+            perror("p2pxfer");
+            break;
+        }
+
+        return AVERROR(errno);
+    }
+
+    return 0;
+#endif
+}
+
+static av_cold void uninit(AVFilterContext *ctx)
+{
+    NetIntP2PXferContext *s = ctx->priv;
+
+    /* Close hwupload P2P session on target device */
+    if (s->fd > 0)
+        close(s->fd);
+
+#ifndef _WIN32
+    if (s->initialized) {
+        if (cleanup_dma_buf(ctx,0,0,0,0) < 0) {
+            av_log(ctx, AV_LOG_ERROR, "Can't clean up DMA buffer\n");
+        }
+    }
+#endif
+
+    if (s->session_opened) {
+        ni_device_session_close(&s->api_ctx, 1, NI_DEVICE_TYPE_UPLOAD);
+        ni_device_session_context_clear(&s->api_ctx);
+    }
+
+    av_frame_free(&s->out);
+}
+
 static int config_input(AVFilterLink *inlink)
 {
 #ifndef _WIN32
     AVFilterContext *ctx = inlink->dst;
     NetIntP2PXferContext *s = ctx->priv;
     AVHWFramesContext *frames_ctx = NULL;
-#if IS_FFMPEG_71_AND_ABOVE
-    FilterLink *li = ff_filter_link(inlink);
-    frames_ctx = (AVHWFramesContext *) li->hw_frames_ctx->data;
-#else
-    frames_ctx = (AVHWFramesContext *) inlink->hw_frames_ctx->data;
-#endif
     AVNIDeviceContext *device_ctx = frames_ctx->device_ctx->hwctx;
     ni_retcode_t retcode = 0;
+#if IS_FFMPEG_71_AND_ABOVE
+    FilterLink *li = ff_filter_link(inlink);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    frames_ctx = (AVHWFramesContext *) li->hw_frames_ctx->data;
+#else
+    if (inlink->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
+    frames_ctx = (AVHWFramesContext *) inlink->hw_frames_ctx->data;
+#endif
 
     if (frames_ctx == NULL) {
         av_log(ctx, AV_LOG_ERROR, "No incoming hw frames context\n");
@@ -315,8 +314,7 @@ static int config_input(AVFilterLink *inlink)
 
         /* Create a P2P frame pool for the uploader session of size 1 */
         retcode = ni_device_session_init_framepool(&s->api_ctx, 1, 1);
-        if (retcode < 0)
-        {
+        if (retcode < 0) {
             av_log(ctx, AV_LOG_ERROR, "Can't create frame pool\n");
             goto fail;
         }
@@ -324,8 +322,7 @@ static int config_input(AVFilterLink *inlink)
         /* Allocate the host memory for a hw ni_frame */
         retcode = ni_frame_buffer_alloc_hwenc(&s->niframe,
                                               inlink->w, inlink->h, 0);
-        if (retcode != NI_RETCODE_SUCCESS)
-        {
+        if (retcode != NI_RETCODE_SUCCESS) {
             av_log(ctx, AV_LOG_ERROR, "Can't allocate host memory\n");
             goto fail;
         }
@@ -362,6 +359,10 @@ static int config_output(AVFilterLink *outlink)
 
 #if IS_FFMPEG_71_AND_ABOVE
     FilterLink *li = ff_filter_link(ctx->inputs[0]);
+    if (li->hw_frames_ctx == NULL) {
+        av_log(ctx, AV_LOG_ERROR, "No hw context provided on input\n");
+        return AVERROR(EINVAL);
+    }
     in_frames_ctx = (AVHWFramesContext *) li->hw_frames_ctx->data;
 #else
     in_frames_ctx = (AVHWFramesContext *) ctx->inputs[0]->hw_frames_ctx->data;
@@ -381,6 +382,7 @@ static int config_output(AVFilterLink *outlink)
     out_frames_ctx->height = outlink->h;
     out_frames_ctx->sw_format = in_frames_ctx->sw_format;
     out_frames_ctx->initial_pool_size = NI_PAD_ID; // repurposed
+    ((AVNIFramesContext*)out_frames_ctx->hwctx)->hw_id = s->card_no;
 
     av_log(ctx, AV_LOG_DEBUG, "%s: w=%d; h=%d\n", __func__,
            outlink->w, outlink->h);
@@ -419,7 +421,6 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
     ni_device_info_t *ni_dev_info;
     uint16_t ui16FrameIdx;
     uint32_t ui32FrameSize;
-    uint64_t ui64CardNo;
     int linesize[3];
     AVFrame *out = NULL;
     int retcode,domain,bus,dev,func;
@@ -505,10 +506,6 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
 
         av_frame_copy_props(out, frame);
 
-        /* Change card no */
-        ui64CardNo = (uint64_t) s->card_no;
-        out->opaque = (void *) ui64CardNo;
-
         out->width = link->w;
         out->height = link->h;
         out->format = AV_PIX_FMT_NI_QUAD;
@@ -564,17 +561,15 @@ fail:
 #define OFFSET(x) offsetof(NetIntP2PXferContext, x)
 #define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 
-static const AVOption p2pxfer_options[] = {
+static const AVOption ni_p2pxfer_options[] = {
     { "card_no", "target hardware id", OFFSET(card_no), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 255, FLAGS },
-    { "keep_alive_timeout", "keep alive timeout", OFFSET(keep_alive_timeout),
-      AV_OPT_TYPE_INT, {.i64 = NI_DEFAULT_KEEP_ALIVE_TIMEOUT},
-      NI_MIN_KEEP_ALIVE_TIMEOUT, NI_MAX_KEEP_ALIVE_TIMEOUT, FLAGS },
+    NI_FILT_OPTION_KEEPALIVE,
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(p2pxfer);
+AVFILTER_DEFINE_CLASS(ni_p2pxfer);
 
-static const AVFilterPad avfilter_vf_p2pxfer_inputs[] = {
+static const AVFilterPad inputs[] = {
     {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
@@ -588,7 +583,7 @@ static const AVFilterPad avfilter_vf_p2pxfer_inputs[] = {
 #endif
 };
 
-static const AVFilterPad avfilter_vf_p2pxfer_outputs[] = {
+static const AVFilterPad outputs[] = {
     {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
@@ -605,17 +600,17 @@ AVFilter ff_vf_p2pxfer_ni_quadra = {
     .name = "ni_quadra_p2pxfer",
     .description = NULL_IF_CONFIG_SMALL("NETINT Quadra P2P transfer v" NI_XCODER_REVISION),
     .priv_size = sizeof(NetIntP2PXferContext),
-    .priv_class = &p2pxfer_class,
+    .priv_class = &ni_p2pxfer_class,
     .preinit = preinit,
     .uninit = uninit,
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 #if (LIBAVFILTER_VERSION_MAJOR >= 8)
-    FILTER_INPUTS(avfilter_vf_p2pxfer_inputs),
-    FILTER_OUTPUTS(avfilter_vf_p2pxfer_outputs),
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
     FILTER_QUERY_FUNC(query_formats),
 #else
-    .inputs = avfilter_vf_p2pxfer_inputs,
-    .outputs = avfilter_vf_p2pxfer_outputs,
+    .inputs = inputs,
+    .outputs = outputs,
     .query_formats = query_formats
 #endif
 };

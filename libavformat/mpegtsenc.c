@@ -27,6 +27,8 @@
 #include "libavutil/mathematics.h"
 #include "libavutil/mem.h"
 #include "libavutil/opt.h"
+#include "libavutil/eval.h"
+#include "libavutil/avstring.h"
 
 #include "libavcodec/ac3_parser_internal.h"
 #include "libavcodec/bytestream.h"
@@ -142,7 +144,13 @@ typedef struct MpegTSWrite {
     // and each ES (a/v) info section
     int64_t max_bitrate;
     int64_t max_video_bitrate;
-    int64_t max_audio_bitrate[10];
+    char* max_audio_bitrates_str; // CSV string of audio bitrates
+    int32_t max_audio_bitrates_unitized[40]; // bitrate in multiples of 50 bytes/sec
+
+    // NETINT: option to disable forcing PAT+PMT at keyframes
+    int force_pat_pmt_key_off;
+    // NETINT: option to disable forcing PCR at keyframes
+    int force_pcr_key_off;
 } MpegTSWrite;
 
 /* a PES packet header is generated every DEFAULT_PES_HEADER_FREQ packets */
@@ -461,7 +469,7 @@ static int get_dvb_stream_type(AVFormatContext *s, AVStream *st)
     case AV_CODEC_ID_SMPTE_2038:
         stream_type = STREAM_TYPE_PRIVATE_DATA;
         break;
-	// NETINT: add scte35 type to mpegts muxer as PSI
+    // NETINT: add scte35 type to mpegts muxer as PSI
     case AV_CODEC_ID_SCTE_35:
         stream_type = STREAM_TYPE_SCTE_35;
         break;
@@ -553,7 +561,7 @@ static int mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
     q += 2; /* patched after */
 
     /* put program info here */
-	// NETINT: add scte35 type to mpegts muxer as PSI
+    // NETINT: add scte35 type to mpegts muxer as PSI
     for (i = 0; i < s->nb_streams; i++) {
         if(s->streams[i]->codecpar->codec_id==AV_CODEC_ID_SCTE_35){
             *q++ = 0x05; // ANSI SCTE35 descriptor tag
@@ -780,12 +788,14 @@ static int mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
             }
 
             // NETINT: write audio maxbitrate_descriptor
-            if (ts->max_audio_bitrate[audio_index])
+            if (audio_index < sizeof(ts->max_audio_bitrates_unitized) /
+                              sizeof(ts->max_audio_bitrates_unitized[0]) &&
+                ts->max_audio_bitrates_unitized[audio_index])
             {
                 *q++ = 0x0e; // descriptor_tag - MAX_BITRATE_DESCRIPTOR
                 *q++ = 0x03; // descriptor_length
                 uint32_t max_audio_bitrate;
-                max_audio_bitrate = (ts->max_audio_bitrate[audio_index] + (8 * 50) - 1) / (8 * 50); // bitrate in units of 50 bytes/s
+                max_audio_bitrate = ts->max_audio_bitrates_unitized[audio_index];
                 max_audio_bitrate |= 0xc00000;
                 *q++ = (max_audio_bitrate>>16) & 0xff;
                 *q++ = (max_audio_bitrate>>8) & 0xff;
@@ -1428,6 +1438,46 @@ static int mpegts_init(AVFormatContext *s)
         av_log(s, AV_LOG_VERBOSE, ", nit every %"PRId64" ms", av_rescale(ts->nit_period, 1000, PCR_TIME_BASE));
     av_log(s, AV_LOG_VERBOSE, "\n");
 
+    // NETINT: parse maximum_audio_bitrates as a string of comma separated values
+    if (ts->max_audio_bitrates_str) {
+        char *saveptr = NULL;
+        char *token = NULL;
+        char *aud_br_tok_tail = NULL;
+        double aud_br = 0;
+        char *str = av_strdup(ts->max_audio_bitrates_str);
+        int arr_size = sizeof(ts->max_audio_bitrates_unitized) /
+                       sizeof(ts->max_audio_bitrates_unitized[0]);
+        if (!str) {
+            return AVERROR(ENOMEM);
+        }
+        token = av_strtok(str, ",", &saveptr);
+        i = 0;
+        while (token && i < arr_size) {
+            aud_br = av_strtod(token, &aud_br_tok_tail);
+
+            if (*aud_br_tok_tail) {
+                av_log(s, AV_LOG_ERROR, "Expected number for "
+                       "mpegts_maximum_audio_bitrates but found: %s\n");
+                return AVERROR(EINVAL);
+            } else if (aud_br < 0 || aud_br > (((1<<22) - 1) * (8 * 50))) {
+                av_log(s, AV_LOG_ERROR, "The value for %s was %d which is not "
+                       "within %d - %d\n", token, (int32_t) aud_br, 0,
+                       ((1<<22) - 1) * (8 * 50));
+            } else {
+                ts->max_audio_bitrates_unitized[i] = ((int32_t) aud_br +
+                                                      (8 * 50) - 1) / (8 * 50);
+                i++;
+            }
+            token = av_strtok(NULL, ",", &saveptr);
+        }
+        av_freep(&str);
+        if (token && i == arr_size) {
+            av_log(s, AV_LOG_WARNING, "Cannot process more than %d comma "
+                   "separated values for mpegts_maximum_audio_bitrates\n",
+                   arr_size);
+        }
+    }
+
     return 0;
 }
 
@@ -1618,7 +1668,8 @@ static void mpegts_write_pes(AVFormatContext *s, AVStream *st,
     int is_dvb_subtitle = (st->codecpar->codec_id == AV_CODEC_ID_DVB_SUBTITLE);
     int is_dvb_teletext = (st->codecpar->codec_id == AV_CODEC_ID_DVB_TELETEXT);
     int64_t delay = av_rescale(s->max_delay, 90000, AV_TIME_BASE);
-    int force_pat = st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && key && !ts_st->prev_payload_key;
+    // NETINT: option to disable forcing PAT+PMT at keyframes
+    int force_pat = ts->force_pat_pmt_key_off ? 0 : (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && key && !ts_st->prev_payload_key);
     int force_sdt = 0;
     int force_nit = 0;
 
@@ -1681,7 +1732,25 @@ static void mpegts_write_pes(AVFormatContext *s, AVStream *st,
                 }
                 ts->next_pcr = next_pcr;
             }
-            if (dts != AV_NOPTS_VALUE && (dts - pcr / 300) > delay) {
+            // NETINT: if DTS jumps by >5s, reset PCR counter
+            if (dts != AV_NOPTS_VALUE && (dts - pcr / 300) > delay + (5 * 90000)) {
+                int64_t prev_first_pcr = ts->first_pcr;
+                if (ts->copyts < 1) {
+                    ts->first_pcr = av_rescale(s->max_delay, PCR_TIME_BASE, AV_TIME_BASE) + dts * 300;
+                } else {
+                    ts->first_pcr = dts * 300;
+                }
+                ts->total_size = 0;
+                av_log(s, AV_LOG_ERROR,
+                       "DTS greater than PCR by 5 seconds, resetting PCR counter.\n"
+                       "DTS:%.3fs, PCR:%.3fs, first_PCR:%.3fs, new_PCR and new_first_PCR:%.3fs\n",
+                       (dts / (double) st->time_base.den) * st->time_base.num,
+                       (pcr / (double) PCR_TIME_BASE),
+                       (prev_first_pcr / (double) PCR_TIME_BASE),
+                       (ts->first_pcr / (double) PCR_TIME_BASE));
+                /* recalculate write_pcr and possibly retransmit si_info */
+                continue;
+            } else if (dts != AV_NOPTS_VALUE && (dts - pcr / 300) > delay) {
                 /* pcr insert gets priority over null packet insert */
                 if (write_pcr)
                     mpegts_insert_pcr_only(s, st);
@@ -1715,7 +1784,7 @@ static void mpegts_write_pes(AVFormatContext *s, AVStream *st,
             ts_st->discontinuity = 0;
         }
         if (!(ts->flags & MPEGTS_FLAG_OMIT_RAI) &&
-            key && is_start && pts != AV_NOPTS_VALUE &&
+            (key && !ts->force_pcr_key_off) && is_start && pts != AV_NOPTS_VALUE &&
             !is_dvb_teletext /* adaptation+payload forbidden for teletext (ETSI EN 300 472 V1.3.1 4.1) */) {
             // set Random Access for key frames
             if (ts_st->pcr_period)
@@ -2521,31 +2590,17 @@ static const AVOption options[] = {
       OFFSET(sdt_period_us), AV_OPT_TYPE_DURATION, { .i64 = SDT_RETRANS_TIME * 1000LL }, 0, INT64_MAX, ENC },
     { "nit_period", "NIT retransmission time limit in seconds",
       OFFSET(nit_period_us), AV_OPT_TYPE_DURATION, { .i64 = NIT_RETRANS_TIME * 1000LL }, 0, INT64_MAX, ENC },
-    // NETINT: maximum bitrate descriptors
-    { "mpegts_max_bitrate", "MAX bitrate set in bits",
+    // NETINT: maximum bitrate descriptors written in PMT
+    { "mpegts_max_bitrate", "PMT metadata for maximum bitrate in bits",
       OFFSET(max_bitrate), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
-    { "mpegts_max_video_bitrate", "MAX video bitrate set in bits",
+    { "mpegts_max_video_bitrate", "PMT metadata for maximum video bitrate in bits",
       OFFSET(max_video_bitrate), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
-    { "mpegts_max_audio_bitrate0", "MAX audio bitrate set in bits",
-      OFFSET(max_audio_bitrate[0]), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
-    { "mpegts_max_audio_bitrate1", "MAX audio bitrate set in bits",
-      OFFSET(max_audio_bitrate[1]), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
-    { "mpegts_max_audio_bitrate2", "MAX audio bitrate set in bits",
-      OFFSET(max_audio_bitrate[2]), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
-    { "mpegts_max_audio_bitrate3", "MAX audio bitrate set in bits",
-      OFFSET(max_audio_bitrate[3]), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
-    { "mpegts_max_audio_bitrate4", "MAX audio bitrate set in bits",
-      OFFSET(max_audio_bitrate[4]), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
-    { "mpegts_max_audio_bitrate5", "MAX audio bitrate set in bits",
-      OFFSET(max_audio_bitrate[5]), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
-    { "mpegts_max_audio_bitrate6", "MAX audio bitrate set in bits",
-      OFFSET(max_audio_bitrate[6]), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
-    { "mpegts_max_audio_bitrate7", "MAX audio bitrate set in bits",
-      OFFSET(max_audio_bitrate[7]), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
-    { "mpegts_max_audio_bitrate8", "MAX audio bitrate set in bits",
-      OFFSET(max_audio_bitrate[8]), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
-    { "mpegts_max_audio_bitrate9", "MAX audio bitrate set in bits",
-      OFFSET(max_audio_bitrate[9]), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, ((1<<22) - 1) * (8 * 50), ENC },
+    { "mpegts_max_audio_bitrates", "PMT metadata for maximum audio bitrate in bits, separated by commas for multiple audio streams",
+      OFFSET(max_audio_bitrates_str), AV_OPT_TYPE_STRING, { .str = NULL }, .flags = ENC },
+    // NETINT: option to disable forcing PAT+PMT at keyframes
+    { "force_pat_pmt_key_off", "don't force PAT/PMT on keyframes", OFFSET(force_pat_pmt_key_off), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, ENC },
+    // NETINT: option to disable forcing PCR at keyframes
+    { "force_pcr_key_off", "don't force PCR on keyframes", OFFSET(force_pcr_key_off), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, ENC },
     { NULL },
 };
 

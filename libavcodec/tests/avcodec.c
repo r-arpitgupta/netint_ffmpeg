@@ -73,6 +73,7 @@ int main(void){
         }
         if (codec->type != AVMEDIA_TYPE_VIDEO &&
             codec->type != AVMEDIA_TYPE_AUDIO &&
+            codec->type != AVMEDIA_TYPE_DATA &&
             codec->type != AVMEDIA_TYPE_SUBTITLE)
             ERR_EXT("Codec %s has unsupported type %s\n",
                     get_type_string(codec->type));

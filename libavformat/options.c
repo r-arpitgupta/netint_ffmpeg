@@ -297,7 +297,7 @@ AVStream *avformat_new_stream(AVFormatContext *s, const AVCodec *c)
         // NETINT: Change PTS from 33bit integer to 62bit integer to delay PTS
         // discontinuity at rollover except for mpeg and mpegts format
         if (!strcmp(s->iformat->name, "mpeg") || !strcmp(s->iformat->name, "mpegts"))
-            avpriv_set_pts_info(st, 32, 1, 90000);
+            avpriv_set_pts_info(st, 33, 1, 90000);
         else
             avpriv_set_pts_info(st, 62, 1, 90000);
         /* we set the current DTS to 0 so that formats without any timestamps

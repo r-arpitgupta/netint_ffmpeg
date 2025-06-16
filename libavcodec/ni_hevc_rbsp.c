@@ -120,7 +120,7 @@ void ni_put_bits(ni_bitstream_t *stream, uint8_t bits, const uint32_t data) {
     while (bits--) {
         stream->cache <<= 1;
 
-        if (data & ni_bit_set_mask[bits]) {
+        if ((bits < 32) && (data & ni_bit_set_mask[bits])) {
             stream->cache |= 1;
         }
         stream->cur_bits++;

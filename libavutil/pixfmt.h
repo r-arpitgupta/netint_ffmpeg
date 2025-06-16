@@ -447,10 +447,8 @@ enum AVPixelFormat {
      * niFrameSurface1_t structure, for Netint Quadra.
      */
     AV_PIX_FMT_NI_QUAD,
-    AV_PIX_FMT_NI_QUAD_8_TILE_4X4, /// 8-bit tiled 4x4 compression format within
-                                   /// QUADRA
-    AV_PIX_FMT_NI_QUAD_10_TILE_4X4, /// 10-bit tiled 4x4 compression format
-                                    /// within QUADRA
+    AV_PIX_FMT_NI_QUAD_8_TILE_4X4,  /// 8-bit tiled 4x4 compression format within QUADRA
+    AV_PIX_FMT_NI_QUAD_10_TILE_4X4, /// 10-bit tiled 4x4 compression format within QUADRA
 
     AV_PIX_FMT_NB         ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
 };

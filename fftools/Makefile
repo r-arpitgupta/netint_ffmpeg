@@ -23,6 +23,7 @@ OBJS-ffmpeg +=                  \
     fftools/sync_queue.o        \
     fftools/thread_queue.o      \
 
+OBJS-ffmpeg-$(CONFIG_HLS_MUXER) += libavformat/ni_scte35.o
 OBJS-ffplay += fftools/ffplay_renderer.o
 
 define DOFFTOOL

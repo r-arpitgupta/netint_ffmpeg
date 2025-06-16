@@ -2137,8 +2137,7 @@ static int choose_input(const FilterGraph *fg, const FilterGraphThread *fgt)
         }
     }
 
-    //NETINT it is possible that all all inputs have ended, return -1
-    // av_assert0(best_input >= 0);
+    av_assert0(best_input >= 0);
 
     return best_input;
 }

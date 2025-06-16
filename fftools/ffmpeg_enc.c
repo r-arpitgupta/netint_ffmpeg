@@ -762,6 +762,13 @@ static enum AVPictureType forced_kf_apply(void *logctx, KeyframeForceCtx *kf,
         goto force_keyframe;
     }
 
+    if (frame->opaque_ref) {
+        if (((FrameData*)frame->opaque_ref->data)->is_scte35_keyframe) {
+            av_log(logctx, AV_LOG_VERBOSE, "SCTE 35: forcing keyframe at time %f\n", pts_time);
+            goto force_keyframe;
+        }
+    }
+
     return AV_PICTURE_TYPE_NONE;
 
 force_keyframe:

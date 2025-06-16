@@ -835,7 +835,7 @@ do {                                                                           \
         group_idx = match_group_separator(groups, nb_groups, opt);
         if (group_idx >= 0) {
             GET_ARG(arg);
-            //NETINT also has dec option to select decoder. 
+            //NETINT also has dec option to select decoder.
             //Differentiate using command syntax, ffmpeg loopback vs netint e.g. 0:0 vs 1
             if (!strcmp(opt, "dec")) {
                 const char* colon_pos = strchr(arg, ':');

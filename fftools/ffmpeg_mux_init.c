@@ -1383,10 +1383,12 @@ static int ost_add(Muxer *mux, const OptionsContext *o, enum AVMediaType type,
 
         // NETINT: automatically enable gen_global_headers for MKV/HLS/ASF/FLV containers
         if ((ost->enc_ctx->codec_type == AVMEDIA_TYPE_VIDEO) &&
-            (!strcmp(mux->fc->oformat->name, "matroska") ||
+            (!strcmp(mux->fc->oformat->name, "segment") ||
+        !strcmp(mux->fc->oformat->name, "matroska") ||
             !strcmp(mux->fc->oformat->name, "hls") ||
             !strcmp(mux->fc->oformat->name, "asf") ||
-            !strcmp(mux->fc->oformat->name, "flv"))) {
+            !strcmp(mux->fc->oformat->name, "flv") ||
+            !strcmp(mux->fc->oformat->name, "mp4"))) {
             av_opt_set(ost->enc_ctx->priv_data, "gen_global_headers", "on", 0);
         }
 

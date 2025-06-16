@@ -39,6 +39,7 @@
 #include "libavutil/thread.h"
 #include "libavutil/threadmessage.h"
 #include "libavutil/time.h"
+#include "libavutil/avstring.h"
 
 // 100 ms
 // FIXME: some other value? make this dynamic?
@@ -1421,6 +1422,25 @@ fail:
     return ret;
 }
 
+// NETINT get name of codec being processed from context
+static const char* get_codec_name_from_context(SchDec *dec)
+{
+    AVClass* avc = *(AVClass **) dec;
+    const char* codec_name = NULL;
+    if (avc->parent_log_context_offset) {
+        AVClass** parent = *(AVClass ***) (((uint8_t *) dec) +
+                                           avc->parent_log_context_offset);
+        if (parent && *parent) {
+
+            if ((*parent)->item_name)
+                codec_name = ((*parent)->item_name)(parent);
+            else
+                codec_name = (av_default_item_name)(parent);
+        }
+    }
+    return codec_name;
+}
+
 static int start_prepare(Scheduler *sch)
 {
     int ret;
@@ -1456,9 +1476,21 @@ static int start_prepare(Scheduler *sch)
             SchDecOutput *o = &dec->outputs[j];
 
             if (!o->nb_dst) {
-                av_log(dec, AV_LOG_ERROR,
-                       "Decoder output %u not connected to any sink\n", j);
-                return AVERROR(EINVAL);
+                const char* codec_name = get_codec_name_from_context(dec);
+
+                // NETINT workaround to accomodate SCTE-35 decoding that
+                // has no destination setup.
+                if (codec_name &&
+                    av_stristr(codec_name, "dec:scte35_ni_dummy_dec")) {
+                    av_log(dec, AV_LOG_INFO,
+                           "SCTE-35 dummy decoder output %u not connected to "
+                           "any sink, ignored.\n", j);
+                    o->nb_dst = 1;
+                } else {
+                    av_log(dec, AV_LOG_ERROR,
+                           "Decoder output %u not connected to any sink\n", j);
+                    return AVERROR(EINVAL);
+                }
             }
 
             o->dst_finished = av_calloc(o->nb_dst, sizeof(*o->dst_finished));
@@ -2240,14 +2272,28 @@ int sch_dec_send(Scheduler *sch, unsigned dec_idx,
                 return ret;
         }
 
-        ret = dec_send_to_dst(sch, o->dst[i], finished, to_send);
-        if (ret < 0) {
-            av_frame_unref(to_send);
-            if (ret == AVERROR_EOF) {
-                nb_done++;
-                continue;
+        if (!o->dst) {
+            // NETINT workaround to accomodate SCTE-35 decoding that
+            // has no destination setup.
+            const char* codec_name = get_codec_name_from_context(dec);
+            if (codec_name &&
+                av_stristr(codec_name, "dec:scte35_ni_dummy_dec")) {
+                av_log(dec, AV_LOG_INFO, "SCTE-35 dummy decoder is not "
+                       "connected to any sink, ignored.\n");
+            } else {
+                av_log(dec, AV_LOG_ERROR, "Error: dec_idx %u out_idx %u no dst,"
+                       "codec_name: %s.\n", codec_name ? codec_name : "none");
             }
-            return ret;
+        } else {
+            ret = dec_send_to_dst(sch, o->dst[i], finished, to_send);
+            if (ret < 0) {
+                av_frame_unref(to_send);
+                if (ret == AVERROR_EOF) {
+                    nb_done++;
+                    continue;
+                }
+                return ret;
+            }
         }
     }
 
@@ -2270,9 +2316,24 @@ static int dec_done(Scheduler *sch, unsigned dec_idx)
         SchDecOutput *o = &dec->outputs[i];
 
         for (unsigned j = 0; j < o->nb_dst; j++) {
-            int err = dec_send_to_dst(sch, o->dst[j], &o->dst_finished[j], NULL);
-            if (err < 0 && err != AVERROR_EOF)
-                ret = err_merge(ret, err);
+            int err = 0;
+            if (!o->dst) {
+                // NETINT workaround to accomodate SCTE-35 decoding that
+                // has no destination setup.
+                const char* codec_name = get_codec_name_from_context(dec);
+                if (codec_name &&
+                    av_stristr(codec_name, "dec:scte35_ni_dummy_dec")) {
+                    av_log(dec, AV_LOG_INFO, "SCTE-35 dummy decoder is not "
+                           "connected to any sink, ignored.\n");
+                } else {
+                    av_log(dec, AV_LOG_ERROR, "Error: dec dst %u has no dst,"
+                           "codec_name: %s.\n", codec_name ? codec_name : "none");
+                }
+            } else {
+                err = dec_send_to_dst(sch, o->dst[j], &o->dst_finished[j], NULL);
+                if (err < 0 && err != AVERROR_EOF)
+                    ret = err_merge(ret, err);
+            }
         }
     }
 
