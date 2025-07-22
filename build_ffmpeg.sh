@@ -85,6 +85,42 @@ extract_arg () {
     fi
 }
 
+#################
+# BUILD fdk-aac #
+#################
+function build_aac
+{
+    declare -r GIT_AAC="https://github.com/mstorsjo/fdk-aac"
+    declare -r SRC_AAC="$DEPS_SRC/aac"
+
+    if [[ ! -d $SRC_AAC ]]
+    then
+        #git clone $GIT_AAC $SRC_AAC
+        taglist_filename="taglist.txt"
+        git ls-remote --refs --tags $GIT_AAC | awk '{print $2}' | sed  "s|refs/tags/||g" > $taglist_filename
+        latest="$(cat $taglist_filename | grep ^v | sort | tail -1)"
+        git clone --depth 1 --branch $latest $GIT_AAC $SRC_AAC
+    fi
+
+    if [[ $OPT_ENABLE_STATIC -eq 1 ]]
+    then
+        buildtype="--disable-shared"
+    else
+        buildtype="--enable-shared"
+    fi
+
+    pushd $SRC_AAC
+    #latest=$(git tag | grep ^v | sort | tail -1)
+    #git reset --hard $latest
+    autoreconf -fiv
+    ./configure \
+        --prefix="$BUILDROOT" \
+        $buildtype
+    make -j 4
+    make install
+    popd
+}
+
 if [ `whoami` = root ]; then
     read -p "Do you wish to execute with sudo [Y/N]? " -n 1 -r
     echo   
@@ -166,6 +202,8 @@ while [ "$1" != "" ]; do
         --ffnvcodec)     enable_ffnvcodec=true
         ;;
         --vmaf)          enable_vmaf=true
+        ;;
+        --libfdk-aac)    enable_libfdk_aac=true
         ;;
         --shared)        enable_shared=true
         ;;
@@ -272,6 +310,11 @@ if $enable_ffnvcodec; then
     extra_config_flags="${extra_config_flags} --extra-cflags=-I/usr/local/cuda/targets/x86_64-linux/include --extra-ldflags=-L/usr/local/cuda/targets/x86_64-linux/lib --enable-cuda-nvcc --enable-cuda --enable-cuvid --enable-nvdec --enable-nvenc"
 else
     extra_config_flags="${extra_config_flags} --disable-ffnvcodec --disable-cuda-nvcc --disable-cuda --disable-cuvid --disable-nvdec --disable-nvenc"
+fi
+
+if $enable_libfdk_aac; then
+    build_aac
+    extra_config_flags="${extra_config_flags} --enable-libfdk-aac"
 fi
 
 if $enable_vmaf; then
