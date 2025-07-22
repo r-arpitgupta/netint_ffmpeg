@@ -112,7 +112,7 @@ function build_aac
     pushd $SRC_AAC
     #latest=$(git tag | grep ^v | sort | tail -1)
     #git reset --hard $latest
-    # autoreconf -fiv
+    autoreconf -fiv
     ./configure $buildtype
     make -j 4
     make install
