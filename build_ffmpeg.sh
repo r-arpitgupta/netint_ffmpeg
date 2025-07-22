@@ -102,7 +102,7 @@ function build_aac
         git clone --depth 1 --branch $latest $GIT_AAC $SRC_AAC
     fi
 
-    if [[ $OPT_ENABLE_STATIC -eq 1 ]]
+    if [[ $enable_static == "true" ]]
     then
         buildtype="--disable-shared"
     else
@@ -112,10 +112,8 @@ function build_aac
     pushd $SRC_AAC
     #latest=$(git tag | grep ^v | sort | tail -1)
     #git reset --hard $latest
-    autoreconf -fiv
-    ./configure \
-        --prefix="$BUILDROOT" \
-        $buildtype
+    # autoreconf -fiv
+    ./configure $buildtype
     make -j 4
     make install
     popd
